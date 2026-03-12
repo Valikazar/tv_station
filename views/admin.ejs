@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="<%= lang %>">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= t.admin_title %></title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f7f6;
+            margin: 0;
+            padding: 0;
+        }
+
+        .navbar {
+            background-color: #333;
+            overflow: hidden;
+            padding: 0 20px;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .navbar a {
+            float: left;
+            display: block;
+            color: #f2f2f2;
+            text-align: center;
+            padding: 14px 16px;
+            text-decoration: none;
+            font-size: 17px;
+        }
+
+        .navbar a:hover {
+            background-color: #ddd;
+            color: black;
+        }
+
+        .navbar a.active {
+            background-color: #007bff;
+            color: white;
+        }
+
+        .container {
+            max-width: 1100px;
+            margin: 20px auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        h2 {
+            color: #555;
+            margin-top: 0;
+            margin-bottom: 20px;
+            font-size: 18px;
+        }
+
+        .slots-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 15px;
+        }
+
+        .slots-table th {
+            background-color: #f8f9fa;
+            padding: 10px;
+            text-align: left;
+            border-bottom: 2px solid #dee2e6;
+            font-size: 14px;
+            color: #555;
+            white-space: nowrap;
+        }
+
+        .slots-table td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #eee;
+            vertical-align: middle;
+        }
+
+        .slots-table tr.overlap td {
+            background-color: #ffe0e0;
+        }
+
+        .slots-table tr:hover td {
+            background-color: #f8f9fa;
+        }
+
+        .slots-table tr.overlap:hover td {
+            background-color: #ffd0d0;
+        }
+
+        .time-input {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+        }
+
+        .time-input input {
+            width: 45px;
+            padding: 6px 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .time-input span {
+            font-weight: bold;
+            font-size: 16px;
+        }
+
+        .duration-input {
+            width: 60px;
+            padding: 6px 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .name-input {
+            width: 150px;
+            padding: 6px 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .btn-delete {
+            background-color: #ff4d4d;
+            color: white;
+            padding: 6px 10px;
+        }
+
+        .btn-delete:hover {
+            background-color: #cc0000;
+        }
+
+        .btn-add {
+            background-color: #28a745;
+            color: white;
+            margin-bottom: 15px;
+        }
+
+        .btn-add:hover {
+            background-color: #218838;
+        }
+
+        .btn-save {
+            background-color: #007bff;
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            padding: 12px 30px;
+        }
+
+        .btn-save:hover {
+            background-color: #0056b3;
+        }
+
+        .btn-save:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+
+        .message {
+            padding: 10px 15px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            display: none;
+        }
+
+        .message.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .message.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .footer-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .slot-end {
+            color: #999;
+            font-size: 12px;
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 100;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-content {
+            background-color: #fff;
+            margin: 15% auto;
+            padding: 25px;
+            border-radius: 8px;
+            width: 450px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+            text-align: left;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .close {
+            float: right;
+            font-size: 24px;
+            cursor: pointer;
+        }
+
+        .lang-switcher { display:flex; gap:4px; align-items:center; }
+        .lang-switcher .lang-btn { 
+            padding:3px 10px; 
+            border:1px solid rgba(255,255,255,0.4); 
+            border-radius:4px; 
+            background:transparent !important; 
+            color:white !important; 
+            font-size:12px; 
+            cursor:pointer; 
+            transition: all 0.2s; 
+            margin: 0 !important;
+            width: auto !important;
+            height: auto !important;
+            line-height: normal !important;
+        }
+        .lang-switcher .lang-btn.active { background:rgba(255,255,255,0.2) !important; font-weight:bold; border-color:rgba(255,255,255,0.6); }
+        .lang-switcher .lang-btn:hover { background:rgba(255,255,255,0.1) !important; }
+    </style>
+</head>
+
+<body>
+
+    <div class="navbar" style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+            <a href="/" class=""><%= t.nav_reports %></a>
+            <a href="/ads" class=""><%= t.nav_content %></a>
+            <a href="/watch" class=""><%= t.nav_watch %></a>
+            <a href="/health" class=""><%= t.nav_health %></a>
+            <% if (typeof username !=='undefined' && username==='admin' ) { %>
+                <a href="/admin" class="active"><%= t.nav_admin_slots %></a>
+                <a href="/admin/channels" class=""><%= t.nav_admin_channels %></a>
+                <a href="/admin/receivers" class=""><%= t.nav_admin_receivers %></a>
+                <% } %>
+        </div>
+        <div style="display:flex; align-items:center; padding-right:16px;">
+            <div class="channel-selector" style="margin-right:20px;">
+                <select onchange="if(typeof switchChannel === 'function') switchChannel(this.value);"
+                    style="padding:4px; border-radius:4px; border:1px solid #ccc; background:#fff; font-size:14px; cursor:pointer;">
+                    <% if (typeof channels !=='undefined' && channels.length> 0) { %>
+                        <% channels.forEach(ch=> { %>
+                            <option value="<%= ch.id %>" <%=typeof currentChannelId !=='undefined' &&
+                                ch.id===currentChannelId ? 'selected' : '' %>><%= t.nav_channel %>: <%= ch.name %>
+                            </option>
+                            <% }); %>
+                                <% } else { %>
+                                    <option value="1"><%= t.nav_channel %>: <%= t.nav_channel_main %></option>
+                                    <% } %>
+                </select>
+            </div>
+            <div class="lang-switcher" style="margin-right:16px;">
+                <form method="POST" action="/set-lang" style="display:inline;">
+                    <input type="hidden" name="lang" value="en">
+                    <button type="submit" class="lang-btn <%= lang === 'en' ? 'active' : '' %>">EN</button>
+                </form>
+                <form method="POST" action="/set-lang" style="display:inline;">
+                    <input type="hidden" name="lang" value="ru">
+                    <button type="submit" class="lang-btn <%= lang === 'ru' ? 'active' : '' %>">RU</button>
+                </form>
+            </div>
+            <a href="/logout" style="float:none;"><%= t.nav_logout %></a>
+        </div>
+    </div>
+    <script>
+        if (typeof window.switchChannel === 'undefined') {
+            window.switchChannel = function (id) {
+                fetch('/admin/channels/switch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channel_id: id })
+                }).then(() => {
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete('channel_id');
+                    window.location.href = url.href;
+                });
+            }
+        }
+    </script>
+
+    <div class="container">
+        <h1><i class="fas fa-cog"></i> <%= t.admin_h1 %></h1>
+
+        <div class="main-slot-config"
+            style="background: #e9ecef; padding: 15px; border-radius: 6px; margin-bottom: 25px;">
+            <h2><%= t.admin_main_slot_h2 %></h2>
+            <div
+                style="display: flex; gap: 20px; align-items: center; justify-content: space-between; flex-wrap: wrap;">
+                <div>
+                    <label style="font-size: 14px; font-weight: 500; margin-right: 10px;"><%= t.admin_main_start_label %></label>
+                    <select id="mainStartBehavior" class="name-input" style="width: 350px;">
+                        <option value="1"><%= t.admin_main_start_opt1 %></option>
+                        <option value="2"><%= t.admin_main_start_opt2 %></option>
+                        <option value="3"><%= t.admin_main_start_opt3 %></option>
+                        <option value="4"><%= t.admin_main_start_opt4 %></option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size: 14px; font-weight: 500;">
+                        <input type="checkbox" id="mainExcludeStats"> <%= t.admin_main_exclude_stats %>
+                    </label>
+                </div>
+                <div>
+                    <button class="btn btn-save" style="font-size: 14px; padding: 8px 16px;"
+                        onclick="saveMainSettings()">
+                        <i class="fas fa-save"></i> <%= t.admin_main_save_btn %>
+                    </button>
+                </div>
+                <div>
+                    <button class="btn" style="font-size: 14px; padding: 8px 16px; background: #6c757d; color: white;"
+                        onclick="openFallbackModal()">
+                        <i class="fas fa-upload"></i> <%= t.admin_fallback_btn_prefix %><%= typeof fallbackPath !== 'undefined' ? fallbackPath : 'fall.mp4' %>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <h2><%= t.admin_h2_slots %></h2>
+
+        <div id="messageBox" class="message"></div>
+
+        <table class="slots-table" id="slotsTable">
+            <thead>
+                <tr>
+                    <th><%= t.admin_th_name %></th>
+                    <th><%= t.admin_th_time %></th>
+                    <th><%= t.admin_th_duration %></th>
+                    <th><%= t.admin_th_end %></th>
+                    <th><%= t.admin_th_start_rule %></th>
+                    <th style="text-align: center;"><%= t.admin_th_exclude %></th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody id="slotsBody">
+            </tbody>
+        </table>
+
+        <div class="footer-actions">
+            <button class="btn btn-add" onclick="addSlot()">
+                <i class="fas fa-plus"></i> <%= t.admin_btn_add_slot %>
+            </button>
+
+            <button class="btn btn-save" id="saveBtn" onclick="saveSlots()">
+                <i class="fas fa-save"></i> <%= t.admin_btn_save %>
+            </button>
+        </div>
+    </div>
+
+    <div id="slots-data" data-slots="<%= JSON.stringify(slots) %>" style="display: none;"></div>
+    <div id="fallbackModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('fallbackModal')">&times;</span>
+            <h2><%= t.admin_fallback_modal_title %></h2>
+            <p style="font-size: 13px; color: #666; margin-bottom: 20px;">
+                <%= t.admin_fallback_modal_desc.replace('%s', typeof currentChannelId !== 'undefined' ? currentChannelId : 1) %>
+            </p>
+            <form id="fallbackUploadForm">
+                <div class="form-group">
+                    <label><%= t.admin_fallback_file_label %></label>
+                    <input type="file" id="fallbackFile" name="fallbackFile" accept="video/*,.mp4" required>
+                </div>
+                <button type="submit" class="btn btn-save" style="width: 100%; margin-top: 10px;" id="fbSubmitBtn">
+                    <%= t.admin_fallback_upload_btn %>
+                </button>
+
+                <div id="fbProgressContainer"
+                    style="display:none; margin-top:15px; width:100%; height:20px; background:#ddd; border-radius:10px; overflow:hidden; position:relative;">
+                    <div id="fbProgressBar" style="width:0%; height:100%; background:#2ecc71; transition: width 0.2s;">
+                    </div>
+                    <div id="fbProgressText"
+                        style="position:absolute; top:0; left:0; width:100%; height:100%; text-align:center; line-height:20px; font-size:11px; font-weight:bold; color:#000;">
+                        0%</div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/js/all.min.js"></script>
+    <script>
+        // i18n strings for JS
+        const MSG_OVERLAP     = <%- JSON.stringify(t.admin_js_overlap) %>;
+        const MSG_ADD_ONE     = <%- JSON.stringify(t.admin_js_add_one) %>;
+        const MSG_SAVING      = <%- JSON.stringify(t.admin_js_saving) %>;
+        const MSG_CONN_ERROR  = <%- JSON.stringify(t.admin_js_conn_error) %>;
+        const MSG_UPLOADING   = <%- JSON.stringify(t.admin_fallback_uploading) %>;
+        const MSG_SEL_FILE    = <%- JSON.stringify(t.admin_fallback_select_file) %>;
+        const MSG_SUCCESS     = <%- JSON.stringify(t.admin_fallback_success) %>;
+        const MSG_ERROR       = <%- JSON.stringify(t.admin_fallback_error) %>;
+        const MSG_UPLOAD_BTN  = <%- JSON.stringify(t.admin_fallback_upload_btn) %>;
+        const MSG_SAVE_BTN    = <%- JSON.stringify(t.admin_btn_save) %>;
+        const MSG_NEW_SLOT    = <%- JSON.stringify(t.admin_new_slot_name) %>;
+        const MSG_DEL_TITLE   = <%- JSON.stringify(t.admin_delete_slot_title) %>;
+        const OPT1 = <%- JSON.stringify(t.admin_slot_opt1) %>;
+        const OPT2 = <%- JSON.stringify(t.admin_slot_opt2) %>;
+        const OPT3 = <%- JSON.stringify(t.admin_slot_opt3) %>;
+        const OPT4 = <%- JSON.stringify(t.admin_slot_opt4) %>;
+
+        // Initial slots from server
+        const slotsDataEl = document.getElementById('slots-data');
+        let slots = JSON.parse(slotsDataEl.dataset.slots);
+
+        function openFallbackModal() {
+            document.getElementById('fallbackModal').style.display = 'block';
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).style.display = 'none';
+        }
+
+        document.getElementById('fallbackUploadForm').onsubmit = function (e) {
+            e.preventDefault();
+            const fileInput = document.getElementById('fallbackFile');
+            if (!fileInput.files.length) return alert(MSG_SEL_FILE);
+
+            const btn = document.getElementById('fbSubmitBtn');
+            const progressContainer = document.getElementById('fbProgressContainer');
+            const progressBar = document.getElementById('fbProgressBar');
+            const progressText = document.getElementById('fbProgressText');
+
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + MSG_UPLOADING;
+            progressContainer.style.display = 'block';
+
+            const formData = new FormData();
+            formData.append('fallbackFile', fileInput.files[0]);
+
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/admin/upload-fallback', true);
+
+            xhr.upload.onprogress = function (e) {
+                if (e.lengthComputable) {
+                    const pct = Math.round((e.loaded / e.total) * 100);
+                    progressBar.style.width = pct + '%';
+                    progressText.innerText = pct + '%';
+                }
+            };
+
+            xhr.onload = function () {
+                if (xhr.status === 200) {
+                    alert(MSG_SUCCESS);
+                    location.reload();
+                } else {
+                    alert(MSG_ERROR + xhr.responseText);
+                    btn.disabled = false;
+                    btn.innerHTML = MSG_UPLOAD_BTN;
+                }
+            };
+
+            xhr.send(formData);
+        };
+
+        function padTwo(n) {
+            return n.toString().padStart(2, '0');
+        }
+
+        function calcEnd(hour, minute, duration) {
+            const total = hour * 60 + minute + duration;
+            const h = Math.floor(total / 60) % 24;
+            const m = total % 60;
+            return padTwo(h) + ':' + padTwo(m);
+        }
+
+        function renderSlots() {
+            const tbody = document.getElementById('slotsBody');
+            tbody.innerHTML = '';
+
+            slots.forEach((slot, index) => {
+                const tr = document.createElement('tr');
+                tr.dataset.index = index;
+
+                const endTime = calcEnd(slot.hour, slot.minute, slot.duration);
+
+                tr.innerHTML = `
+                    <td>
+                        <input class="name-input" type="text" value="${slot.name}" onchange="updateSlot(${index}, 'name', this.value)" onfocus="this.select()">
+                    </td>
+                    <td>
+                        <div class="time-input">
+                            <input type="number" min="0" max="23" value="${slot.hour}" onchange="updateSlot(${index}, 'hour', this.value)" onfocus="this.select()">
+                            <span>:</span>
+                            <input type="number" min="0" max="59" value="${padTwo(slot.minute)}" onchange="updateSlot(${index}, 'minute', this.value)" onfocus="this.select()">
+                        </div>
+                    </td>
+                    <td>
+                        <input class="duration-input" type="number" min="1" max="1440" value="${slot.duration}" onchange="updateSlot(${index}, 'duration', this.value)" onfocus="this.select()">
+                    </td>
+                    <td>
+                        <span class="slot-end">${endTime}</span>
+                    </td>
+                    <td>
+                        <select class="name-input" style="width: 250px;" onchange="updateSlot(${index}, 'start_behavior', this.value)">
+                            <option value="1" ${slot.start_behavior === 1 ? 'selected' : ''}>${OPT1}</option>
+                            <option value="2" ${slot.start_behavior === 2 ? 'selected' : ''}>${OPT2}</option>
+                            <option value="3" ${slot.start_behavior === 3 ? 'selected' : ''}>${OPT3}</option>
+                            <option value="4" ${slot.start_behavior === 4 ? 'selected' : ''}>${OPT4}</option>
+                        </select>
+                    </td>
+                    <td style="text-align: center;">
+                        <input type="checkbox" ${slot.exclude_from_stats ? 'checked' : ''} onchange="updateSlot(${index}, 'exclude_from_stats', this.checked)">
+                    </td>
+                    <td style="text-align: center;">
+                        <button class="btn btn-delete" onclick="removeSlot(${index})" title="${MSG_DEL_TITLE}">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function updateSlot(index, field, value) {
+            if (field === 'name') {
+                slots[index][field] = value;
+            } else if (field === 'exclude_from_stats') {
+                slots[index][field] = value;
+            } else {
+                slots[index][field] = parseInt(value, 10) || 0;
+            }
+            clearOverlaps();
+            renderSlots();
+        }
+
+        function removeSlot(index) {
+            slots.splice(index, 1);
+            clearOverlaps();
+            renderSlots();
+        }
+
+        function addSlot() {
+            slots.push({
+                name: MSG_NEW_SLOT,
+                hour: 0,
+                minute: 0,
+                duration: 30,
+                start_behavior: 4,
+                end_behavior: 1,
+                exclude_from_stats: false
+            });
+            renderSlots();
+            const tbody = document.getElementById('slotsBody');
+            const lastRow = tbody.lastElementChild;
+            if (lastRow) lastRow.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function clearOverlaps() {
+            const rows = document.getElementById('slotsBody').children;
+            for (let row of rows) row.classList.remove('overlap');
+        }
+
+        function checkOverlaps() {
+            const indexed = slots.map((s, i) => ({ ...s, origIndex: i }));
+            indexed.sort((a, b) => (a.hour * 60 + a.minute) - (b.hour * 60 + b.minute));
+
+            const overlapIndices = new Set();
+
+            for (let i = 0; i < indexed.length; i++) {
+                const currentEnd = indexed[i].hour * 60 + indexed[i].minute + indexed[i].duration;
+                for (let j = i + 1; j < indexed.length; j++) {
+                    const nextStart = indexed[j].hour * 60 + indexed[j].minute;
+                    if (nextStart < currentEnd) {
+                        overlapIndices.add(indexed[i].origIndex);
+                        overlapIndices.add(indexed[j].origIndex);
+                    }
+                }
+            }
+
+            const rows = document.querySelectorAll('#slotsBody tr');
+            rows.forEach((row, idx) => {
+                if (overlapIndices.has(idx)) {
+                    row.classList.add('overlap');
+                } else {
+                    row.classList.remove('overlap');
+                }
+            });
+
+            return overlapIndices.size > 0;
+        }
+
+        function showMessage(text, type) {
+            const el = document.getElementById('messageBox');
+            el.innerText = text;
+            el.className = 'message ' + type;
+            el.style.display = 'block';
+            setTimeout(() => el.style.display = 'none', 3000);
+        }
+
+        function hideMessage() {
+            const box = document.getElementById('messageBox');
+            box.style.display = 'none';
+        }
+
+        async function saveSlots() {
+            if (checkOverlaps()) {
+                showMessage(MSG_OVERLAP, 'error');
+                return;
+            }
+
+            if (slots.length === 0) {
+                showMessage(MSG_ADD_ONE, 'error');
+                return;
+            }
+
+            const saveBtn = document.getElementById('saveBtn');
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + MSG_SAVING;
+
+            try {
+                const response = await fetch('/admin/slots', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ slots }),
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showMessage('✅ ' + data.message, 'success');
+                    if (data.slots) {
+                        slots = data.slots;
+                        renderSlots();
+                    }
+                } else {
+                    if (data.overlaps) {
+                        const rows = document.querySelectorAll('#slotsBody tr');
+                        data.overlaps.forEach(idx => {
+                            if (rows[idx]) rows[idx].classList.add('overlap');
+                        });
+                    }
+                    showMessage('❌ ' + data.error, 'error');
+                }
+            } catch (err) {
+                showMessage('❌ ' + MSG_CONN_ERROR, 'error');
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = '<i class="fas fa-save"></i> ' + MSG_SAVE_BTN;
+            }
+        }
+
+        async function loadMainSettings() {
+            try {
+                const response = await fetch('/admin/main-slot');
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('mainStartBehavior').value = data.main_start_behavior || 4;
+                    document.getElementById('mainExcludeStats').checked = !!data.main_exclude_from_stats;
+                }
+            } catch (err) {
+                console.error('Failed to load Main settings', err);
+            }
+        }
+
+        async function saveMainSettings() {
+            const startBehavior = parseInt(document.getElementById('mainStartBehavior').value, 10);
+            const excludeStats = document.getElementById('mainExcludeStats').checked;
+
+            try {
+                const response = await fetch('/admin/main-slot', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        main_start_behavior: startBehavior,
+                        main_exclude_from_stats: excludeStats
+                    }),
+                });
+                const data = await response.json();
+                if (response.ok) {
+                    showMessage('✅ ' + data.message, 'success');
+                } else {
+                    showMessage('❌ ' + (data.error || MSG_CONN_ERROR), 'error');
+                }
+            } catch (err) {
+                showMessage('❌ ' + MSG_CONN_ERROR, 'error');
+            }
+        }
+
+        // Initial render
+        renderSlots();
+        loadMainSettings();
+    </script>
+</body>
+
+</html>

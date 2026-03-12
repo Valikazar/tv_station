@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="<%= lang %>">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= t.health_title %></title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f7f6;
+            margin: 0;
+            padding: 0;
+        }
+
+        .navbar {
+            background-color: #333;
+            overflow: hidden;
+            padding: 0 20px;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .navbar a {
+            float: left;
+            display: block;
+            color: #f2f2f2;
+            text-align: center;
+            padding: 14px 16px;
+            text-decoration: none;
+            font-size: 17px;
+        }
+
+        .navbar a:hover {
+            background-color: #ddd;
+            color: black;
+        }
+
+        .navbar a.active {
+            background-color: #007bff;
+            color: white;
+        }
+
+        .main-content {
+            padding: 40px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #333;
+        }
+
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+
+        .status-card {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+
+        .status-card h3 {
+            margin: 0 0 10px 0;
+            font-size: 18px;
+            color: #555;
+        }
+
+        .status-card .state {
+            font-size: 14px;
+            color: #777;
+            margin-bottom: 15px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 6px 12px;
+            font-size: 14px;
+            font-weight: bold;
+            border-radius: 20px;
+            color: white;
+        }
+
+        .badge.healthy {
+            background-color: #28a745;
+        }
+
+        .badge.unhealthy {
+            background-color: #dc3545;
+        }
+
+        .badge.unknown {
+            background-color: #ffc107;
+            color: #333;
+        }
+
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1001;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-content {
+            background-color: #fff;
+            margin: 5% auto;
+            padding: 20px;
+            border-radius: 8px;
+            width: 80%;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .modal-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .modal-close {
+            cursor: pointer;
+            font-size: 28px;
+            font-weight: bold;
+            color: #aaa;
+            line-height: 1;
+        }
+
+        .modal-close:hover {
+            color: #333;
+        }
+
+        pre.logs-area {
+            background: #1e1e1e;
+            color: #f1f1f1;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-y: auto;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            flex-grow: 1;
+            margin: 0;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .btn-logs {
+            margin-top: 15px;
+            padding: 8px 16px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s;
+        }
+
+        .btn-logs:hover {
+            background-color: #0056b3;
+        }
+
+        .lang-switcher { display:flex; gap:4px; align-items:center; }
+        .lang-switcher .lang-btn { 
+            padding:3px 10px; 
+            border:1px solid rgba(255,255,255,0.4); 
+            border-radius:4px; 
+            background:transparent !important; 
+            color:white !important; 
+            font-size:12px; 
+            cursor:pointer; 
+            transition: all 0.2s; 
+            margin: 0 !important;
+            width: auto !important;
+            height: auto !important;
+            line-height: normal !important;
+        }
+        .lang-switcher .lang-btn.active { background:rgba(255,255,255,0.2) !important; font-weight:bold; border-color:rgba(255,255,255,0.6); }
+        .lang-switcher .lang-btn:hover { background:rgba(255,255,255,0.1) !important; }
+    </style>
+</head>
+
+<body>
+    <div class="navbar" style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+            <a href="/" class=""><%= t.nav_reports %></a>
+            <a href="/ads" class=""><%= t.nav_content %></a>
+            <a href="/watch" class=""><%= t.nav_watch %></a>
+            <a href="/health" class="active"><%= t.nav_health %></a>
+            <% if (typeof username !=='undefined' && username==='admin' ) { %>
+                <a href="/admin" class=""><%= t.nav_admin_slots %></a>
+                <a href="/admin/channels" class=""><%= t.nav_admin_channels %></a>
+            <a href="/admin/receivers" class=""><%= t.nav_admin_receivers %></a>
+            <% } %>
+        </div>
+        <div style="display:flex; align-items:center; padding-right:16px;">
+            <div class="channel-selector" style="margin-right:20px;">
+                <select onchange="if(typeof switchChannel === 'function') switchChannel(this.value);"
+                    style="padding:4px; border-radius:4px; border:1px solid #ccc; background:#fff; font-size:14px; cursor:pointer;">
+                    <% if (typeof channels !=='undefined' && channels.length> 0) { %>
+                        <% channels.forEach(ch=> { %>
+                            <option value="<%= ch.id %>" <%=typeof currentChannelId !=='undefined' &&
+                                ch.id===currentChannelId ? 'selected' : '' %>><%= t.nav_channel %>: <%= ch.name %>
+                            </option>
+                            <% }); %>
+                                <% } else { %>
+                                    <option value="1"><%= t.nav_channel %>: <%= t.nav_channel_main %></option>
+                                    <% } %>
+                </select>
+            </div>
+            <div class="lang-switcher" style="margin-right:16px;">
+                <form method="POST" action="/set-lang" style="display:inline;">
+                    <input type="hidden" name="lang" value="en">
+                    <button type="submit" class="lang-btn <%= lang === 'en' ? 'active' : '' %>">EN</button>
+                </form>
+                <form method="POST" action="/set-lang" style="display:inline;">
+                    <input type="hidden" name="lang" value="ru">
+                    <button type="submit" class="lang-btn <%= lang === 'ru' ? 'active' : '' %>">RU</button>
+                </form>
+            </div>
+            <a href="/logout" style="float:none;"><%= t.nav_logout %></a>
+        </div>
+    </div>
+    <script>
+        if (typeof window.switchChannel === 'undefined') {
+            window.switchChannel = function (id) {
+                fetch('/admin/channels/switch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channel_id: id })
+                }).then(() => {
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete('channel_id');
+                    window.location.href = url.href;
+                });
+            }
+        }
+    </script>
+
+    <div class="main-content">
+        <div class="container">
+            <h1><%= t.health_h1 %></h1>
+
+            <% if (error) { %>
+                <div class="error-message">
+                    <%= error %>
+                </div>
+                <% } %>
+
+                    <div class="status-grid">
+                        <% containers.forEach(container=> { %>
+                            <div class="status-card">
+                                <h3>
+                                    <%= container.name %>
+                                </h3>
+                                <div class="state">
+                                    <%= container.status %>
+                                </div>
+                                <div class="badge <%= container.health %>">
+                                    <% if (container.health==='healthy' ) { %>
+                                        <%= t.health_badge_healthy %>
+                                        <% } else if (container.health==='unhealthy' ) { %>
+                                            <%= t.health_badge_unhealthy %>
+                                            <% } else { %>
+                                                <%= container.state %> ⚠️
+                                                    <% } %>
+                                </div>
+                                <div style="display: flex; gap: 5px; justify-content: center; flex-wrap: wrap;">
+                                    <button class="btn-logs" onclick="showLogs('<%= container.name %>', 'main')">Logs:
+                                        App</button>
+                                    <% if (container.name.includes('tv_playout')) { %>
+                                        <button class="btn-logs" style="background-color: #f39c12;"
+                                            onclick="showLogs('<%= container.name %>', 'master')">Logs: Master</button>
+                                        <button class="btn-logs" style="background-color: #17a2b8;"
+                                            onclick="showLogs('<%= container.name %>', 'feeder')">Logs: Feeder</button>
+                                        <% } %>
+                                </div>
+                            </div>
+                            <% }); %>
+                    </div>
+
+                    <% if (containers.length===0 && !error) { %>
+                        <p style="text-align: center; color: #777;"><%= t.health_no_containers %></p>
+                        <% } %>
+        </div>
+    </div>
+
+    <!-- Logs Modal -->
+    <div id="logsModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title" id="modalTitle"><%= t.health_modal_title %></div>
+                <span class="modal-close" onclick="closeLogs()">&times;</span>
+            </div>
+            <pre class="logs-area" id="logsArea"><%= t.health_loading %></pre>
+        </div>
+    </div>
+
+    <script>
+        const modal = document.getElementById('logsModal');
+        const logsArea = document.getElementById('logsArea');
+        const modalTitle = document.getElementById('modalTitle');
+        let logsInterval = null;
+
+        const MSG_LOGS_LOADING = <%- JSON.stringify(t.health_logs_loading) %>;
+        const MSG_LOGS_NONE    = <%- JSON.stringify(t.health_logs_none) %>;
+        const MSG_LOGS_ERROR   = <%- JSON.stringify(t.health_logs_error) %>;
+        const MSG_HTTP_ERROR   = <%- JSON.stringify(t.health_http_error) %>;
+
+        async function fetchLogsContent(containerName, logType) {
+            let url = `/health/logs/${containerName}`;
+            if (logType === 'master') url = `/health/logs/${containerName}/master`;
+            if (logType === 'feeder') url = `/health/logs/${containerName}/feeder`;
+
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(MSG_HTTP_ERROR + response.status);
+                let text = await response.text();
+
+                if (text.includes('\r')) {
+                    const lines = text.split('\r');
+                    text = lines.map(l => l.trim()).filter(l => l.length > 0).join('\n');
+                }
+
+                const isScrolledToBottom = logsArea.scrollHeight - logsArea.clientHeight <= logsArea.scrollTop + 50;
+                logsArea.innerText = text || MSG_LOGS_NONE;
+
+                if (isScrolledToBottom) {
+                    logsArea.scrollTop = logsArea.scrollHeight;
+                }
+            } catch (err) {
+                logsArea.innerText = MSG_LOGS_ERROR + err.message;
+            }
+        }
+
+        async function showLogs(containerName, logType) {
+            let titleType = 'App';
+            if (logType === 'master') titleType = 'Master FFmpeg';
+            if (logType === 'feeder') titleType = 'Feeder FFmpeg';
+
+            modalTitle.innerText = `Logs: ${containerName} (${titleType})`;
+            logsArea.innerText = MSG_LOGS_LOADING;
+            modal.style.display = 'block';
+
+            await fetchLogsContent(containerName, logType);
+
+            if (logsInterval) clearInterval(logsInterval);
+            logsInterval = setInterval(() => {
+                fetchLogsContent(containerName, logType);
+            }, 1000);
+        }
+
+        function closeLogs() {
+            modal.style.display = 'none';
+            if (logsInterval) {
+                clearInterval(logsInterval);
+                logsInterval = null;
+            }
+        }
+
+        window.onclick = function (event) {
+            if (event.target == modal) {
+                closeLogs();
+            }
+        }
+    </script>
+</body>
+
+</html>

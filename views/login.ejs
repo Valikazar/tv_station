@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="<%= lang %>">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= t.login_page_title %></title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        }
+
+        .login-card {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 40px;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            width: 100%;
+            max-width: 380px;
+            text-align: center;
+        }
+
+        .login-card h1 {
+            color: #1a1a2e;
+            font-size: 24px;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .login-card .subtitle {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 30px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            text-align: left;
+            color: #333;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 14px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: border-color 0.3s, box-shadow 0.3s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #0f3460;
+            box-shadow: 0 0 0 4px rgba(15, 52, 96, 0.1);
+        }
+
+        .error-message {
+            background: #fee2e2;
+            color: #dc2626;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 20px;
+            border: 1px solid #fecaca;
+        }
+
+        .btn-login {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #0f3460, #1a1a2e);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .btn-login:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(15, 52, 96, 0.4);
+        }
+
+        .btn-login:active {
+            transform: translateY(0);
+        }
+
+        .logo {
+            width: 64px;
+            height: 64px;
+            background: linear-gradient(135deg, #0f3460, #1a1a2e);
+            border-radius: 16px;
+            margin: 0 auto 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .logo svg {
+            width: 36px;
+            height: 36px;
+            fill: white;
+        }
+
+        .lang-switcher {
+            position: absolute;
+            top: 16px;
+            right: 16px;
+            display: flex;
+            gap: 6px;
+        }
+
+        .lang-switcher { display:flex; gap:4px; align-items:center; }
+        .lang-switcher .lang-btn { 
+            padding:3px 10px; 
+            border:1px solid rgba(255,255,255,0.4); 
+            border-radius:4px; 
+            background:transparent !important; 
+            color:white !important; 
+            font-size:12px; 
+            cursor:pointer; 
+            transition: all 0.2s; 
+            margin: 0 !important;
+            width: auto !important;
+            height: auto !important;
+            line-height: normal !important;
+        }
+        .lang-switcher .lang-btn.active { background:rgba(255,255,255,0.2) !important; font-weight:bold; border-color:rgba(255,255,255,0.6); }
+        .lang-switcher .lang-btn:hover { background:rgba(255,255,255,0.1) !important; }
+        .lang-switcher { position: absolute; top: 20px; right: 20px; z-index: 1000; }
+    </style>
+</head>
+
+<body>
+    <!-- Language switcher -->
+    <div class="lang-switcher">
+        <form method="POST" action="/set-lang" style="display:inline;">
+            <input type="hidden" name="lang" value="en">
+            <button type="submit" class="lang-btn <%= lang === 'en' ? 'active' : '' %>">EN</button>
+        </form>
+        <form method="POST" action="/set-lang" style="display:inline;">
+            <input type="hidden" name="lang" value="ru">
+            <button type="submit" class="lang-btn <%= lang === 'ru' ? 'active' : '' %>">RU</button>
+        </form>
+    </div>
+
+    <div class="login-card">
+        <div class="logo">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+                <path
+                    d="M21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h5v2h8v-2h5c1.1 0 1.99-.9 1.99-2L23 5c0-1.1-.9-2-2-2zm0 14H3V5h18v12z" />
+            </svg>
+        </div>
+        <h1><%= t.login_title %></h1>
+        <p class="subtitle"><%= t.login_subtitle %></p>
+
+        <% if (typeof error !=='undefined' && error) { %>
+            <div class="error-message">
+                <%= error %>
+            </div>
+            <% } %>
+
+                <form action="/login" method="POST">
+                    <div class="form-group">
+                        <label for="login"><%= t.login_label_login %></label>
+                        <input type="text" id="login" name="login" placeholder="<%= t.login_placeholder_login %>" autofocus required>
+                    </div>
+                    <div class="form-group">
+                        <label for="password"><%= t.login_label_password %></label>
+                        <input type="password" id="password" name="password" placeholder="<%= t.login_placeholder_password %>" required>
+                    </div>
+                    <button type="submit" class="btn-login"><%= t.login_btn %></button>
+                </form>
+    </div>
+</body>
+
+</html>

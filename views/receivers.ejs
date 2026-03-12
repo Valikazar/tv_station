@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="<%= lang %>">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= t.receivers_title %></title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f7f6; margin: 0; padding: 0; }
+        .navbar {
+            background-color: #333;
+            overflow: hidden;
+            padding: 0 20px;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .navbar a { float: left; display: block; color: #f2f2f2; text-align: center; padding: 14px 16px; text-decoration: none; font-size: 17px; }
+        .navbar a:hover { background-color: #ddd; color: black; }
+        .navbar a.active { background-color: #007bff; color: white; }
+        .container { max-width: 1200px; margin: 20px auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1 { color: #333; margin-bottom: 20px; }
+        .stats-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        .stats-table th { background-color: #f8f9fa; padding: 12px; text-align: left; border-bottom: 2px solid #dee2e6; color: #555; }
+        .stats-table td { padding: 12px; border-bottom: 1px solid #eee; vertical-align: middle; }
+        .stats-table tr:hover { background-color: #f8f9fa; }
+        .status-badge { padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: bold; }
+        .status-online { background-color: #d4edda; color: #155724; }
+        .status-offline { background-color: #f8d7da; color: #721c24; }
+        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; transition: 0.2s; font-size: 14px; }
+        .navbar a.active { background-color: #007bff; color: white; }
+        .lang-switcher { display:flex; gap:4px; align-items:center; }
+        .lang-switcher .lang-btn { 
+            padding:3px 10px; 
+            border:1px solid rgba(255,255,255,0.4); 
+            border-radius:4px; 
+            background:transparent !important; 
+            color:white !important; 
+            font-size:12px; 
+            cursor:pointer; 
+            transition: all 0.2s; 
+            margin: 0 !important;
+            width: auto !important;
+            height: auto !important;
+            line-height: normal !important;
+        }
+        .lang-switcher .lang-btn.active { background:rgba(255,255,255,0.2) !important; font-weight:bold; border-color:rgba(255,255,255,0.6); }
+        .lang-switcher .lang-btn:hover { background:rgba(255,255,255,0.1) !important; }
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); }
+        .modal-content { background: white; margin: 15% auto; padding: 25px; border-radius: 8px; width: 400px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
+        .form-control { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        .close { float: right; cursor: pointer; font-size: 20px; }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <div>
+            <a href="/" class=""><%= t.nav_reports %></a>
+            <a href="/ads" class=""><%= t.nav_content %></a>
+            <a href="/watch" class=""><%= t.nav_watch %></a>
+            <a href="/health" class=""><%= t.nav_health %></a>
+            <% if (typeof username !=='undefined' && username==='admin' ) { %>
+                <a href="/admin" class=""><%= t.nav_admin_slots %></a>
+                <a href="/admin/channels" class=""><%= t.nav_admin_channels %></a>
+                <a href="/admin/receivers" class="active"><%= t.nav_admin_receivers %></a>
+            <% } %>
+        </div>
+        <div style="display:flex; align-items:center; padding-right:16px;">
+            <div class="channel-selector" style="margin-right:20px;">
+                <select onchange="if(typeof switchChannel === 'function') switchChannel(this.value);"
+                    style="padding:4px; border-radius:4px; border:1px solid #ccc; background:#fff; font-size:14px; cursor:pointer;">
+                    <% if (typeof channels !=='undefined' && channels.length> 0) { %>
+                        <% channels.forEach(ch=> { %>
+                            <option value="<%= ch.id %>" <%=typeof currentChannelId !=='undefined' &&
+                                ch.id===currentChannelId ? 'selected' : '' %>><%= t.nav_channel %>: <%= ch.name %>
+                            </option>
+                            <% }); %>
+                                <% } else { %>
+                                    <option value="1"><%= t.nav_channel %>: <%= t.nav_channel_main %></option>
+                                    <% } %>
+                </select>
+            </div>
+            <div class="lang-switcher" style="margin-right:16px;">
+                <form method="POST" action="/set-lang" style="display:inline;">
+                    <input type="hidden" name="lang" value="en">
+                    <button type="submit" class="lang-btn <%= lang === 'en' ? 'active' : '' %>">EN</button>
+                </form>
+                <form method="POST" action="/set-lang" style="display:inline;">
+                    <input type="hidden" name="lang" value="ru">
+                    <button type="submit" class="lang-btn <%= lang === 'ru' ? 'active' : '' %>">RU</button>
+                </form>
+            </div>
+            <a href="/logout" style="float:none;"><%= t.nav_logout %></a>
+        </div>
+    </div>
+    <script>
+        if (typeof window.switchChannel === 'undefined') {
+            window.switchChannel = function (id) {
+                fetch('/admin/channels/switch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channel_id: id })
+                }).then(() => {
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete('channel_id');
+                    window.location.href = url.href;
+                });
+            }
+        }
+    </script>
+
+    <div class="container">
+        <h1><i class="fas fa-microchip"></i> <%= t.receivers_h1 %></h1>
+        <table class="stats-table">
+            <thead>
+                <tr>
+                    <th><%= t.receivers_th_nickname %></th>
+                    <th><%= t.receivers_th_location %></th>
+                    <th><%= t.receivers_th_hostname %></th>
+                    <th><%= t.receivers_th_ip %></th>
+                    <th><%= t.receivers_th_cpu %></th>
+                    <th><%= t.receivers_th_temp %></th>
+                    <th><%= t.receivers_th_traffic %></th>
+                    <th><%= t.receivers_th_playing %></th>
+                    <th><%= t.receivers_th_source %></th>
+                    <th><%= t.receivers_th_last_seen %></th>
+                    <th><%= t.receivers_th_actions %></th>
+                </tr>
+            </thead>
+            <tbody id="receiversBody">
+                <!-- Data will be loaded via JS -->
+            </tbody>
+        </table>
+    </div>
+
+    <div id="commandModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal()">&times;</span>
+            <h2 id="modalTitle"></h2>
+            <div class="form-group">
+                <label>Select Channel:</label>
+                <select id="channelSelect" class="form-control" onchange="updateManualUrl()">
+                    <option value="">-- Manual Entry --</option>
+                    <% availableChannels.forEach(ch => { %>
+                        <option value="<%= ch.protocol || 'udp' %>://<%= ch.multicast_ip %>:<%= ch.multicast_port %>">
+                            <%= ch.name %> (<%= ch.multicast_ip %>:<%= ch.multicast_port %>)
+                        </option>
+                    <% }); %>
+                </select>
+            </div>
+            <div class="form-group">
+                <label><%= t.receivers_label_stream_url %></label>
+                <input type="text" id="streamUrl" class="form-control" placeholder="udp://239.0.0.1:1234">
+            </div>
+            <button class="btn btn-primary" onclick="sendCommand()"><%= t.receivers_btn_send_command %></button>
+            <hr>
+            <div class="form-group">
+                <label><%= t.receivers_label_nickname %></label>
+                <input type="text" id="receiverNickname" class="form-control" placeholder="e.g. Hallway 1">
+            </div>
+            <div class="form-group" style="margin-top: 20px;">
+                <label><%= t.receivers_label_location %></label>
+                <input type="text" id="receiverLocation" class="form-control" placeholder="e.g. Building A, Floor 2">
+            </div>
+            <div style="display: flex; gap: 10px; margin-top: 10px;">
+                <button class="btn btn-primary" onclick="saveDetails()"><%= t.receivers_btn_save_details %></button>
+                <button class="btn btn-sm" style="background-color: #dc3545; color: white;" onclick="rebootReceiver()">
+                    <i class="fas fa-sync-alt"></i> <%= t.receivers_btn_reboot %>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let selectedReceiverId = null;
+        const availableChannelsList = <%- JSON.stringify(availableChannels) %>;
+
+        function getChannelName(url) {
+            if (!url) return '-';
+            const ch = availableChannelsList.find(c => {
+                const chUrl = `${c.protocol || 'udp'}://${c.multicast_ip}:${c.multicast_port}`;
+                return chUrl === url;
+            });
+            if (ch) return `<strong>${ch.name}</strong>`;
+            // If it doesn't match a channel, show a shortened version of the URL
+            return `<span style="font-size: 0.8em; color: #888;">${url.replace('udp://', '').replace('rtp://', '')}</span>`;
+        }
+
+        async function loadReceivers() {
+            try {
+                const res = await fetch('/api/receivers');
+                const data = await res.json();
+                window.lastReceiverData = data; // Cache for modal
+                const tbody = document.getElementById('receiversBody');
+                tbody.innerHTML = '';
+                
+                data.forEach(r => {
+                    const lastSeen = new Date(r.last_seen);
+                    const isOnline = (new Date() - lastSeen) < 30000; // 30 seconds threshold
+                    const statusClass = isOnline ? 'status-online' : 'status-offline';
+                    const statusText = isOnline ? '<%= t.receivers_status_online %>' : '<%= t.receivers_status_offline %>';
+
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td><strong>${r.nickname || '-'}</strong></td>
+                        <td>${r.location || '-'}</td>
+                        <td style="font-size: 0.9em; color: #666;">${r.hostname || 'Unknown'}</td>
+                        <td>${r.ip_address || '-'}</td>
+                        <td>${r.cpu_usage ? r.cpu_usage.toFixed(1) + '%' : '-'}</td>
+                        <td>${r.temperature ? r.temperature.toFixed(1) + '°C' : '-'}</td>
+                        <td>${r.traffic_speed ? (r.traffic_speed * 8 / 1000000).toFixed(2) + ' Mbit/s' : '-'}</td>
+                        <td>${getChannelName(r.actual_stream_url)}</td>
+                        <td>${r.current_source_ip || '-'}</td>
+                        <td title="${lastSeen.toLocaleString()}">
+                            <span class="status-badge ${statusClass}">${statusText}</span>
+                        </td>
+                        <td>
+                            <button class="btn btn-primary btn-sm" onclick="openModal('${r.id}', '${r.hostname}')" title="<%= t.receivers_btn_change_channel %>">
+                                <i class="fas fa-cog"></i>
+                            </button>
+                            ${!isOnline ? `
+                            <button class="btn btn-sm" style="background-color: #dc3545; color: white; margin-left: 5px;" onclick="deleteReceiver('${r.id}')" title="Delete">
+                                <i class="fas fa-trash"></i>
+                            </button>` : ''}
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (e) {
+                console.error('Failed to load receivers', e);
+            }
+        }
+
+        function updateManualUrl() {
+            const select = document.getElementById('channelSelect');
+            const input = document.getElementById('streamUrl');
+            if (select.value) {
+                input.value = select.value;
+            }
+        }
+
+        function openModal(id, hostname) {
+            selectedReceiverId = id;
+            document.getElementById('modalTitle').innerText = '<%= t.receivers_modal_title %>'.replace('%s', hostname);
+            
+            // Find current data from cache
+            const r = window.lastReceiverData ? window.lastReceiverData.find(x => x.id === id) : null;
+            
+            const currentUrl = r ? (r.current_stream_url || "") : "";
+            const streamInput = document.getElementById('streamUrl');
+            const channelSelect = document.getElementById('channelSelect');
+            
+            streamInput.value = currentUrl;
+            
+            // Try to match current URL with one of the predefined channels
+            let matched = false;
+            if (currentUrl) {
+                for (let i = 0; i < channelSelect.options.length; i++) {
+                    if (channelSelect.options[i].value === currentUrl) {
+                        channelSelect.selectedIndex = i;
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (!matched) {
+                channelSelect.value = ""; // Default to manual/none
+            }
+
+            document.getElementById('receiverNickname').value = r ? (r.nickname || "") : "";
+            document.getElementById('receiverLocation').value = r ? (r.location || "") : "";
+            
+            document.getElementById('commandModal').style.display = 'block';
+        }
+
+        function closeModal() {
+            document.getElementById('commandModal').style.display = 'none';
+        }
+
+        async function sendCommand() {
+            const url = document.getElementById('streamUrl').value;
+            if (!url) return alert('Enter URL');
+
+            try {
+                const res = await fetch(`/api/receivers/${selectedReceiverId}/command`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ stream_url: url })
+                });
+                if (res.ok) {
+                    alert('<%= t.receivers_js_command_sent %>');
+                    closeModal();
+                }
+            } catch (e) {
+                alert('Error sending command');
+            }
+        }
+
+        async function deleteReceiver(id) {
+            if (!confirm('Are you sure you want to delete this receiver?')) return;
+            try {
+                const res = await fetch(`/api/receivers/${id}`, { method: 'DELETE' });
+                if (res.ok) {
+                    loadReceivers();
+                }
+            } catch (e) {
+                alert('Error deleting receiver');
+            }
+        }
+
+        async function saveDetails() {
+            const nick = document.getElementById('receiverNickname').value;
+            const loc = document.getElementById('receiverLocation').value;
+            try {
+                const res = await fetch(`/api/receivers/${selectedReceiverId}/details`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ nickname: nick, location: loc })
+                });
+                if (res.ok) {
+                    alert('<%= t.receivers_js_details_saved %>');
+                    loadReceivers();
+                }
+            } catch (e) {
+                alert('Error updating details');
+            }
+        }
+
+        async function rebootReceiver() {
+            if (!confirm('<%= t.receivers_js_reboot_confirm %>')) return;
+            try {
+                const res = await fetch(`/api/receivers/${selectedReceiverId}/reboot`, { method: 'POST' });
+                if (res.ok) {
+                    closeModal();
+                }
+            } catch (e) {
+                alert('Error sending reboot command');
+            }
+        }
+
+        setInterval(loadReceivers, 5000);
+        loadReceivers();
+    </script>
+</body>
+</html>

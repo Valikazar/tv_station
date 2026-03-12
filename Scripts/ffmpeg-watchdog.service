@@ -1,0 +1,15 @@
+[Unit]
+Description=FFmpeg Process Watchdog (kills excess ffmpeg to prevent RAM exhaustion)
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=simple
+ExecStart=/opt/tv_station/ffmpeg_watchdog.sh
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

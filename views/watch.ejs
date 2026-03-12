@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="<%= lang %>">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= t.watch_title %></title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f7f6;
+            margin: 0;
+            padding: 0;
+        }
+
+        .navbar {
+            background-color: #333;
+            overflow: hidden;
+            padding: 0 20px;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .navbar a {
+            float: left;
+            display: block;
+            color: #f2f2f2;
+            text-align: center;
+            padding: 14px 16px;
+            text-decoration: none;
+            font-size: 17px;
+        }
+
+        .navbar a:hover {
+            background-color: #ddd;
+            color: black;
+        }
+
+        .navbar a.active {
+            background-color: #007bff;
+            color: white;
+        }
+
+        .player-container {
+            max-width: 960px;
+            margin: 30px auto;
+            background: #1a1a2e;
+            border-radius: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .player-header {
+            padding: 20px 25px 10px;
+        }
+
+        .player-header h1 {
+            color: #e0e0e0;
+            font-size: 20px;
+            margin: 0;
+        }
+
+        .video-wrapper {
+            padding: 10px 20px 20px;
+        }
+
+        video {
+            width: 100%;
+            border-radius: 8px;
+            background: #000;
+            display: block;
+        }
+
+        .status-bar {
+            padding: 8px 25px 15px;
+            color: #888;
+            font-size: 12px;
+        }
+
+        .status-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+            background: #555;
+            transition: background 0.3s;
+        }
+
+        .status-dot.live {
+            background: #28a745;
+            box-shadow: 0 0 6px #28a745;
+        }
+
+        .status-dot.error {
+            background: #dc3545;
+            box-shadow: 0 0 6px #dc3545;
+        }
+
+        .lang-switcher { display:flex; gap:4px; align-items:center; }
+        .lang-switcher .lang-btn { 
+            padding:3px 10px; 
+            border:1px solid rgba(255,255,255,0.4); 
+            border-radius:4px; 
+            background:transparent !important; 
+            color:white !important; 
+            font-size:12px; 
+            cursor:pointer; 
+            transition: all 0.2s; 
+            margin: 0 !important;
+            width: auto !important;
+            height: auto !important;
+            line-height: normal !important;
+        }
+        .lang-switcher .lang-btn.active { background:rgba(255,255,255,0.2) !important; font-weight:bold; border-color:rgba(255,255,255,0.6); }
+        .lang-switcher .lang-btn:hover { background:rgba(255,255,255,0.1) !important; }
+    </style>
+</head>
+
+<body>
+
+    <div class="navbar" style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+            <a href="/" class=""><%= t.nav_reports %></a>
+            <a href="/ads" class=""><%= t.nav_content %></a>
+            <a href="/watch" class="active"><%= t.nav_watch %></a>
+            <a href="/health" class=""><%= t.nav_health %></a>
+            <% if (typeof username !=='undefined' && username==='admin' ) { %>
+                <a href="/admin" class=""><%= t.nav_admin_slots %></a>
+                <a href="/admin/channels" class=""><%= t.nav_admin_channels %></a>
+                <a href="/admin/receivers" class=""><%= t.nav_admin_receivers %></a>
+                <% } %>
+        </div>
+        <div style="display:flex; align-items:center; padding-right:16px;">
+            <div class="channel-selector" style="margin-right:20px;">
+                <select onchange="if(typeof switchChannel === 'function') switchChannel(this.value);" style="padding:4px; border-radius:4px; border:1px solid #ccc; background:#fff; font-size:14px; cursor:pointer;">
+                    <% if (typeof channels !== 'undefined' && channels.length > 0) { %>
+                        <% channels.forEach(ch => { %>
+                            <option value="<%= ch.id %>" <%= typeof currentChannelId !== 'undefined' && ch.id === currentChannelId ? 'selected' : '' %>><%= t.nav_channel %>: <%= ch.name %></option>
+                        <% }); %>
+                    <% } else { %>
+                        <option value="1"><%= t.nav_channel %>: <%= t.nav_channel_main %></option>
+                    <% } %>
+                </select>
+            </div>
+            <div class="lang-switcher" style="margin-right:16px;">
+                <form method="POST" action="/set-lang" style="display:inline;">
+                    <input type="hidden" name="lang" value="en">
+                    <button type="submit" class="lang-btn <%= lang === 'en' ? 'active' : '' %>">EN</button>
+                </form>
+                <form method="POST" action="/set-lang" style="display:inline;">
+                    <input type="hidden" name="lang" value="ru">
+                    <button type="submit" class="lang-btn <%= lang === 'ru' ? 'active' : '' %>">RU</button>
+                </form>
+            </div>
+            <a href="/logout" style="float:none;"><%= t.nav_logout %></a>
+        </div>
+    </div>
+    <script>
+        if (typeof window.switchChannel === 'undefined') {
+            window.switchChannel = function(id) {
+                fetch('/admin/channels/switch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channel_id: id })
+                }).then(() => {
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete('channel_id');
+                    window.location.href = url.href;
+                });
+            }
+        }
+    </script>
+
+    <div class="player-container">
+        <div class="player-header">
+            <h1><%= t.watch_live %></h1>
+        </div>
+
+        <div class="video-wrapper">
+            <video id="player" controls autoplay muted></video>
+        </div>
+
+        <div class="status-bar">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusText"><%= t.watch_connecting %></span>
+        </div>
+    </div>
+
+    <script src="/hls.min.js"></script>
+    <script>
+        const STREAM_URL = '<%= streamUrl %>';
+        const video = document.getElementById('player');
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+
+        const MSG_ON_AIR      = <%- JSON.stringify(t.watch_on_air) %>;
+        const MSG_ERROR       = <%- JSON.stringify(t.watch_error) %>;
+        const MSG_RECONNECT   = <%- JSON.stringify(t.watch_reconnecting) %>;
+        const MSG_PBK_ERROR   = <%- JSON.stringify(t.watch_playback_error) %>;
+        const MSG_NO_HLS      = <%- JSON.stringify(t.watch_no_hls) %>;
+
+        function setStatus(state, text) {
+            statusDot.className = 'status-dot ' + state;
+            statusText.textContent = text;
+        }
+
+        if (Hls.isSupported()) {
+            const hls = new Hls({
+                enableWorker: true,
+                lowLatencyMode: true,
+                liveSyncDurationCount: 3,
+                liveMaxLatencyDurationCount: 6,
+            });
+
+            hls.loadSource(STREAM_URL);
+            hls.attachMedia(video);
+
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                setStatus('live', MSG_ON_AIR);
+                video.play().catch(() => { });
+            });
+
+            hls.on(Hls.Events.ERROR, (event, data) => {
+                if (data.fatal) {
+                    setStatus('error', MSG_ERROR + data.type);
+                    if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                        setTimeout(() => {
+                            setStatus('', MSG_RECONNECT);
+                            hls.startLoad();
+                        }, 3000);
+                    } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                        hls.recoverMediaError();
+                    }
+                }
+            });
+        } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            video.src = STREAM_URL;
+            video.addEventListener('loadedmetadata', () => {
+                setStatus('live', MSG_ON_AIR);
+                video.play().catch(() => { });
+            });
+            video.addEventListener('error', () => {
+                setStatus('error', MSG_PBK_ERROR);
+            });
+        } else {
+            setStatus('error', MSG_NO_HLS);
+        }
+    </script>
+</body>
+
+</html>

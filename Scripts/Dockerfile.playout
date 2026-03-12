@@ -1,0 +1,16 @@
+FROM python:3.11-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends ffmpeg tzdata procps && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir mysql-connector-python
+
+COPY Scripts/playout.py /app/playout.py
+COPY Scripts/generate_playlist.py /app/generate_playlist.py
+COPY Scripts/playout_entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+WORKDIR /app
+ENTRYPOINT ["/app/entrypoint.sh"]

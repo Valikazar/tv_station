@@ -1,0 +1,884 @@
+<!DOCTYPE html>
+<html lang="<%= lang %>">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= t.ads_title %></title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f7f6;
+            margin: 0;
+            padding: 0;
+        }
+
+        .navbar {
+            background-color: #333;
+            overflow: hidden;
+            padding: 0 20px;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .navbar a {
+            float: left;
+            display: block;
+            color: #f2f2f2;
+            text-align: center;
+            padding: 14px 16px;
+            text-decoration: none;
+            font-size: 17px;
+        }
+
+        .navbar a:hover {
+            background-color: #ddd;
+            color: black;
+        }
+
+        .navbar a.active {
+            background-color: #007bff;
+            color: white;
+        }
+
+        .container {
+            max-width: 1200px;
+            width: fit-content;
+            min-width: 90%;
+            margin: 20px auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        button.primary-btn {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+
+        button.primary-btn:hover {
+            background-color: #0056b3;
+        }
+
+        .table-responsive {
+            overflow: visible;
+            margin-top: 20px;
+            border-radius: 8px;
+            border: 1px solid #ddd;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 1000px;
+        }
+
+        th,
+        td {
+            text-align: center;
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+            font-size: 13px;
+        }
+
+        th {
+            background-color: #f8f9fa;
+            position: sticky;
+            top: 48px;
+            z-index: 10;
+            border-bottom: 2px solid #ddd;
+        }
+
+        th.text-left {
+            left: 0;
+            z-index: 30;
+            box-shadow: 2px 0 4px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        td.text-left {
+            text-align: left;
+            position: sticky;
+            left: 0;
+            background-color: white;
+            z-index: 10;
+            box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
+        }
+
+        tr:hover td.text-left {
+            background-color: #f1f1f1;
+        }
+
+        .action-btn {
+            padding: 5px 10px;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-delete {
+            background-color: #ff4d4d;
+            color: white;
+        }
+
+        .btn-delete:hover {
+            background-color: #cc0000;
+        }
+
+        .btn-add {
+            background-color: #28a745;
+            color: white;
+        }
+
+        .btn-add:hover {
+            background-color: #218838;
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 100;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-content {
+            background-color: #fff;
+            margin: 15% auto;
+            padding: 25px;
+            border-radius: 8px;
+            width: 400px;
+            text-align: center;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal-footer {
+            margin-top: 20px;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .warning-text {
+            color: #cc0000;
+            font-weight: bold;
+            display: none;
+            margin-top: 10px;
+        }
+
+        .close {
+            float: right;
+            font-size: 24px;
+            cursor: pointer;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+            text-align: left;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        .slots-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 5px;
+            text-align: left;
+            margin-top: 10px;
+        }
+
+        .lang-switcher { display:flex; gap:4px; align-items:center; }
+        .lang-switcher .lang-btn { 
+            padding:3px 10px; 
+            border:1px solid rgba(255,255,255,0.4); 
+            border-radius:4px; 
+            background:transparent !important; 
+            color:white !important; 
+            font-size:12px; 
+            cursor:pointer; 
+            transition: all 0.2s; 
+            margin: 0 !important;
+            width: auto !important;
+            height: auto !important;
+            line-height: normal !important;
+        }
+        .lang-switcher .lang-btn.active { background:rgba(255,255,255,0.2) !important; font-weight:bold; border-color:rgba(255,255,255,0.6); }
+        .lang-switcher .lang-btn:hover { background:rgba(255,255,255,0.1) !important; }
+    </style>
+</head>
+
+<body>
+
+    <div class="navbar" style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+            <a href="/" class=""><%= t.nav_reports %></a>
+            <a href="/ads" class="active"><%= t.nav_content %></a>
+            <a href="/watch" class=""><%= t.nav_watch %></a>
+            <a href="/health" class=""><%= t.nav_health %></a>
+            <% if (typeof username !=='undefined' && username==='admin' ) { %>
+                <a href="/admin" class=""><%= t.nav_admin_slots %></a>
+                <a href="/admin/channels" class=""><%= t.nav_admin_channels %></a>
+            <a href="/admin/receivers" class=""><%= t.nav_admin_receivers %></a>
+            <% } %>
+        </div>
+        <div style="display:flex; align-items:center; padding-right:16px;">
+            <div class="channel-selector" style="margin-right:20px;">
+                <select onchange="if(typeof switchChannel === 'function') switchChannel(this.value);"
+                    style="padding:4px; border-radius:4px; border:1px solid #ccc; background:#fff; font-size:14px; cursor:pointer;">
+                    <% if (typeof channels !=='undefined' && channels.length> 0) { %>
+                        <% channels.forEach(ch=> { %>
+                            <option value="<%= ch.id %>" <%=typeof currentChannelId !=='undefined' &&
+                                ch.id===currentChannelId ? 'selected' : '' %>><%= t.nav_channel %>: <%= ch.name %>
+                            </option>
+                            <% }); %>
+                                <% } else { %>
+                                    <option value="1"><%= t.nav_channel %>: <%= t.nav_channel_main %></option>
+                                    <% } %>
+                </select>
+            </div>
+            <div class="lang-switcher" style="margin-right:16px;">
+                <form method="POST" action="/set-lang" style="display:inline;">
+                    <input type="hidden" name="lang" value="en">
+                    <button type="submit" class="lang-btn <%= lang === 'en' ? 'active' : '' %>">EN</button>
+                </form>
+                <form method="POST" action="/set-lang" style="display:inline;">
+                    <input type="hidden" name="lang" value="ru">
+                    <button type="submit" class="lang-btn <%= lang === 'ru' ? 'active' : '' %>">RU</button>
+                </form>
+            </div>
+            <a href="/logout" style="float:none;"><%= t.nav_logout %></a>
+        </div>
+    </div>
+    <script>
+        if (typeof window.switchChannel === 'undefined') {
+            window.switchChannel = function (id) {
+                fetch('/admin/channels/switch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channel_id: id })
+                }).then(() => {
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete('channel_id');
+                    window.location.href = url.href;
+                });
+            }
+        }
+    </script>
+
+    <div class="container">
+        <h1><%= t.ads_h1 %></h1>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <div style="display: flex; gap: 10px;">
+                <button class="primary-btn" id="addBtn" style="margin-bottom: 0;"><i class="fas fa-plus"></i> <%= t.ads_btn_add %></button>
+                <button class="primary-btn" id="generatePlaylistBtn" style="background: #6c757d; margin-bottom: 0;"><i
+                        class="fas fa-sync-alt"></i> <%= t.ads_btn_refresh_schedule %></button>
+                <button class="primary-btn" id="viewPlaylistBtn" style="background: #17a2b8; margin-bottom: 0;"><i
+                        class="fas fa-list"></i> <%= t.ads_btn_view_schedule %></button>
+            </div>
+
+            <div
+                style="background: #fff; padding: 8px 15px; border-radius: 4px; border: 1px solid #ddd; font-size: 14px;">
+                <input type="checkbox" id="showArchived" <%=showArchived ? 'checked' : '' %> style="cursor: pointer;
+                vertical-align: middle;">
+                <label for="showArchived"
+                    style="cursor: pointer; user-select: none; vertical-align: middle; margin-left: 5px;"><%= t.ads_show_archived %></label>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table>
+                <thead>
+                    <tr>
+                        <th class="text-left"><%= t.ads_th_title %></th>
+                        <% slots.forEach(function(slot) { %>
+                            <th title="<%= slot.label %>"
+                                style="font-size: 11px; white-space: nowrap; line-height: 1.2; padding: 5px 2px;">
+                                <div style="color: #2c3e50; margin-bottom: 2px;">
+                                    <%= slot.name %>
+                                </div>
+                                <% if (slot.id !=='MainStream' ) { %>
+                                    <div style="font-size: 14px; font-weight: bold; color: #000;">
+                                        <%= slot.hour.toString().padStart(2, '0' ) %>:<%= slot.minute.toString().padStart(2, '0' ) %>
+                                    </div>
+                                    <div style="color: #7f8c8d; font-weight: normal;">
+                                        <%= slot.duration %> <%= t.ads_col_min %>
+                                    </div>
+                                    <% } %>
+                            </th>
+                            <% }); %>
+                                <% if (showArchived) { %>
+                                    <th style="background-color: #fef3f3; color: #a94442;">
+                                        <%= t.ads_th_archive %>
+                                    </th>
+                                    <% } %>
+                                        <th><%= t.ads_th_date %></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% videos.forEach(function(video) { %>
+                        <tr id="video-row-<%= video.id %>">
+                            <td class="text-left">
+                                <strong id="video-name-<%= video.id %>">
+                                    <%= video.display_name %>
+                                </strong><br>
+                                <small style="color:#666; font-size: 10px;">
+                                    <%= video.filename %>
+                                        <% if (video.duration> 0) { %>
+                                            | <%= Math.floor(video.duration / 60000) %>:<%= String(Math.floor((video.duration % 60000) / 1000)).padStart(2, '0') %>
+                                                <% } %>
+                                </small>
+                            </td>
+                            <% let activeSlots=[]; try { activeSlots=typeof video.target_slots_ids==='string' ? JSON.parse(video.target_slots_ids) : (video.target_slots_ids || []); } catch(e) { activeSlots=[]; } %>
+                                <% slots.forEach(function(slot) { %>
+                                    <td id="cell-<%= video.id %>-<%= slot.dbId %>">
+                                        <% if (activeSlots.includes(slot.dbId)) { %>
+                                            <button class="action-btn btn-delete"
+                                                onclick="confirmRemove('<%= video.id %>', '<%= slot.dbId %>')">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                            <% } else { %>
+                                                <button class="action-btn btn-add"
+                                                    onclick="addToSlot('<%= video.id %>', '<%= slot.dbId %>')">
+                                                    <i class="fas fa-plus"></i>
+                                                </button>
+                                                <% } %>
+                                    </td>
+                                    <% }); %>
+                                        <% if (showArchived) { %>
+                                            <td id="cell-<%= video.id %>-<%= archiveSlot.id %>"
+                                                style="background-color: #fffafa;">
+                                                <% if (activeSlots.includes(archiveSlot.id)) { %>
+                                                    <button class="action-btn btn-delete" title="<%= t.ads_js_remove_permanently %>"
+                                                        onclick="confirmRemove('<%= video.id %>', '<%= archiveSlot.id %>')">
+                                                        <i class="fas fa-fire"></i>
+                                                    </button>
+                                                    <% } else { %>
+                                                        <button class="action-btn btn-add" title="<%= t.ads_js_move_to_archive %>"
+                                                            onclick="addToSlot('<%= video.id %>', '<%= archiveSlot.id %>')">
+                                                            <i class="fas fa-archive"></i>
+                                                        </button>
+                                                        <% } %>
+                                            </td>
+                                            <% } %>
+                                                <td style="white-space: nowrap;">
+                                                    <%= video.created_at ? new Date(video.created_at).toLocaleDateString(lang === "ru" ? "ru-RU" : "en-US") : '-' %>
+                                                </td>
+                        </tr>
+                        <% }); %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Upload Modal -->
+    <div id="uploadModal" class="modal">
+        <div class="modal-content" style="width: 500px;">
+            <span class="close" onclick="closeModal('uploadModal')">&times;</span>
+            <h2><%= t.ads_upload_title %></h2>
+            <div id="diskSpaceInfo" style="margin-bottom: 15px; font-size: 13px; color: #555;">
+                <i class="fas fa-hdd"></i> <%= t.ads_upload_disk_free %> <b id="diskSpaceText">...</b>
+            </div>
+            <form id="uploadForm" action="/ads/upload" method="POST" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label for="displayName"><%= t.ads_upload_name_label %></label>
+                    <input type="text" id="displayName" name="displayName" required>
+                </div>
+
+                <label><%= t.ads_upload_slots_label %></label>
+                <div class="slots-grid">
+                    <% slots.forEach(function(slot) { %>
+                        <div>
+                            <input type="checkbox" id="up_slot_<%= slot.dbId %>" name="slots" value="<%= slot.dbId %>">
+                            <label for="up_slot_<%= slot.dbId %>" style="display:inline; font-weight:normal;">
+                                <%= slot.label %>
+                            </label>
+                        </div>
+                        <% }); %>
+                </div>
+
+                <div class="form-group" style="margin-top: 20px;">
+                    <label><%= t.ads_upload_file_label %></label>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <label for="videoFile" class="primary-btn"
+                            style="margin:0; cursor:pointer; font-weight: normal;">
+                            <i class="fas fa-folder-open"></i> <%= t.ads_upload_choose_file %>
+                        </label>
+                        <span id="fileNameDisplay" style="font-style: italic; color: #666;"><%= t.ads_upload_no_file %></span>
+                    </div>
+                    <input type="file" id="videoFile" name="videoFile" accept="video/*,.mp4,.avi,.mov" required
+                        style="display: none;">
+                </div>
+
+                <button type="submit" class="primary-btn"
+                    style="margin-top:20px; width:100%; transition: all 0.3s ease;" id="submitBtn"><%= t.ads_upload_btn %></button>
+
+                <div id="uploadProgressContainer"
+                    style="display:none; margin-top:15px; width:100%; height:20px; background:#ddd; border-radius:10px; overflow:hidden; position:relative;">
+                    <div id="uploadProgressBar"
+                        style="width:0%; height:100%; background:#2ecc71; transition: width 0.2s;"></div>
+                    <div id="uploadProgressText"
+                        style="position:absolute; top:0; left:0; width:100%; height:100%; text-align:center; line-height:20px; font-size:11px; font-weight:bold; color:#000;">
+                        0%</div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="deleteModal" class="modal">
+        <div class="modal-content">
+            <h2><%= t.ads_delete_title %></h2>
+            <p id="deleteMsg"></p>
+            <p id="deleteWarning" class="warning-text" style="display: none;"></p>
+            <div class="modal-footer">
+                <button class="primary-btn" style="background:#666" onclick="closeModal('deleteModal')"><%= t.ads_delete_btn_cancel %></button>
+                <button class="primary-btn" id="confirmDeleteBtn" style="background:#ff4d4d"><%= t.ads_delete_btn_confirm %></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Playlist Viewer Modal -->
+    <div id="playlistModal" class="modal">
+        <div class="modal-content" style="width: 800px; max-width: 95vw; margin: 5vh auto;">
+            <span class="close" onclick="closeModal('playlistModal')">&times;</span>
+            <h2><%= t.ads_playlist_title %></h2>
+            <div id="playlistScrollContainer"
+                style="max-height: 75vh; overflow-y: auto; overflow-x: hidden; margin-top: 20px; padding-right: 15px;">
+                <table id="playlistTable" style="width: 100%; border-collapse: collapse; table-layout: fixed;">
+                    <thead>
+                        <tr>
+                            <th style="text-align: left; padding: 8px; border-bottom: 2px solid #ddd; width: 15%;"><%= t.ads_playlist_th_time %>
+                            </th>
+                            <th style="text-align: left; padding: 8px; border-bottom: 2px solid #ddd; width: 45%;">
+                                <%= t.ads_playlist_th_name %></th>
+                            <th style="text-align: left; padding: 8px; border-bottom: 2px solid #ddd; width: 20%;"><%= t.ads_playlist_th_slot %>
+                            </th>
+                            <th style="text-align: left; padding: 8px; border-bottom: 2px solid #ddd; width: 20%;">
+                                <%= t.ads_playlist_th_duration %></th>
+                        </tr>
+                    </thead>
+                    <tbody id="playlistTableBody">
+                        <tr>
+                            <td colspan="4"><%= t.ads_js_loading %></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="modal-footer">
+                <button class="primary-btn" style="background:#6c757d"
+                    onclick="closeModal('playlistModal')"><%= t.ads_playlist_btn_close %></button>
+            </div>
+        </div>
+    </div>
+
+    <div id="slot-counts-data" style="display:none;"><%- JSON.stringify(slotCounts) %></div>
+
+    <script>
+        // i18n strings for JS
+        const MSG_REFRESHING      = <%- JSON.stringify(t.ads_js_refreshing) %>;
+        const MSG_SCHED_UPDATED   = <%- JSON.stringify(t.ads_js_schedule_updated) %>;
+        const MSG_ERROR           = <%- JSON.stringify(t.ads_js_error) %>;
+        const MSG_UNKNOWN_ERROR   = <%- JSON.stringify(t.ads_js_unknown_error) %>;
+        const MSG_SERVER_ERROR    = <%- JSON.stringify(t.ads_js_server_error) %>;
+        const MSG_SELECT_SLOT     = <%- JSON.stringify(t.ads_js_select_slot) %>;
+        const MSG_SELECT_FILE     = <%- JSON.stringify(t.ads_js_select_file) %>;
+        const MSG_UPLOADING       = <%- JSON.stringify(t.ads_js_uploading) %>;
+        const MSG_PROCESSING      = <%- JSON.stringify(t.ads_js_processing) %>;
+        const MSG_UPLOAD_ERROR    = <%- JSON.stringify(t.ads_js_upload_error) %>;
+        const MSG_NETWORK_ERROR   = <%- JSON.stringify(t.ads_js_network_error) %>;
+        const MSG_ARCHIVE_LABEL   = <%- JSON.stringify(t.ads_js_archive_label) %>;
+        const MSG_LAST_WARN       = <%- JSON.stringify(t.ads_js_last_in_slot_warn) %>;
+        const MSG_REMOVE_PERM     = <%- JSON.stringify(t.ads_js_remove_permanently) %>;
+        const MSG_REMOVE_SLOT     = <%- JSON.stringify(t.ads_js_remove_from_slot) %>;
+        const MSG_MOVE_ARCHIVE    = <%- JSON.stringify(t.ads_js_move_to_archive) %>;
+        const MSG_ADD_SLOT        = <%- JSON.stringify(t.ads_js_add_to_slot) %>;
+        const MSG_LOADING         = <%- JSON.stringify(t.ads_js_loading) %>;
+        const MSG_EMPTY_SCHED     = <%- JSON.stringify(t.ads_playlist_empty) %>;
+        const MSG_NO_FILE         = <%- JSON.stringify(t.ads_upload_no_file) %>;
+        const MSG_UPLOAD_BTN      = <%- JSON.stringify(t.ads_upload_btn) %>;
+        const MSG_DISK_UNKNOWN    = <%- JSON.stringify(t.ads_upload_disk_unknown) %>;
+        const MSG_CONFIRM_REMOVE  = <%- JSON.stringify(t.ads_js_confirm_remove) %>;
+
+        // Store slot labels and counts using dbId or id as keys matching the backend response
+        const SLOT_LABELS = {};
+        const SLOT_COUNTS = JSON.parse(document.getElementById('slot-counts-data').textContent);
+        <% slots.forEach(function (slot) { %>
+            SLOT_LABELS['<%= slot.dbId %>'] = '<%= slot.label %>';
+        <% }); %>
+            SLOT_LABELS['<%= archiveSlot.id %>'] = MSG_ARCHIVE_LABEL;
+
+        function closeModal(id) {
+            const modal = document.getElementById(id);
+            if (modal) modal.style.display = 'none';
+        }
+
+        document.getElementById('addBtn').onclick = () => {
+            document.getElementById('uploadModal').style.display = 'block';
+        };
+
+        document.getElementById('showArchived').onchange = function () {
+            window.location.href = '/ads?showArchived=' + this.checked;
+        };
+
+        document.getElementById('generatePlaylistBtn').onclick = async function () {
+            const btn = this;
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + MSG_REFRESHING;
+            btn.disabled = true;
+
+            try {
+                const response = await fetch('/ads/generate-playlist', { method: 'POST' });
+                const data = await response.json();
+
+                if (data.success) {
+                    alert(MSG_SCHED_UPDATED);
+                    location.reload();
+                } else {
+                    alert(MSG_ERROR + (data.error || MSG_UNKNOWN_ERROR));
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                }
+            } catch (err) {
+                alert(MSG_SERVER_ERROR);
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        };
+
+        // Auto-fill display name and show filename
+        document.getElementById('videoFile').addEventListener('change', function () {
+            const fileNameDisplay = document.getElementById('fileNameDisplay');
+            if (this.files && this.files.length > 0) {
+                const name = this.files[0].name;
+                fileNameDisplay.textContent = name;
+                fileNameDisplay.style.color = '#333';
+
+                const nameWithoutExt = name.replace(/\.[^/.]+$/, "");
+                const nameInput = document.getElementById('displayName');
+                if (!nameInput.value) nameInput.value = nameWithoutExt;
+            } else {
+                fileNameDisplay.textContent = MSG_NO_FILE;
+                fileNameDisplay.style.color = '#666';
+            }
+        });
+
+        // AJAX file upload with progress bar
+        document.getElementById('uploadForm').addEventListener('submit', function (event) {
+            event.preventDefault();
+
+            const checkboxes = document.querySelectorAll('input[name="slots"]');
+            let anyChecked = false;
+            for (const cb of checkboxes) {
+                if (cb.checked) { anyChecked = true; break; }
+            }
+            if (!anyChecked) {
+                alert(MSG_SELECT_SLOT);
+                return;
+            }
+
+            const fileInput = document.getElementById('videoFile');
+            if (!fileInput.files.length) {
+                alert(MSG_SELECT_FILE);
+                return;
+            }
+
+            const submitBtn = document.getElementById('submitBtn');
+            const progressContainer = document.getElementById('uploadProgressContainer');
+            const progressBar = document.getElementById('uploadProgressBar');
+            const progressText = document.getElementById('uploadProgressText');
+
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + MSG_UPLOADING;
+            submitBtn.style.background = '#95a5a6';
+            progressContainer.style.display = 'block';
+            progressBar.style.width = '0%';
+            progressText.innerText = '0%';
+
+            const formData = new FormData(this);
+
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/ads/upload', true);
+
+            xhr.upload.onprogress = function (e) {
+                if (e.lengthComputable) {
+                    const percentComplete = Math.round((e.loaded / e.total) * 100);
+                    progressBar.style.width = percentComplete + '%';
+                    progressText.innerText = percentComplete + '%';
+                    if (percentComplete === 100) {
+                        progressText.innerText = MSG_PROCESSING;
+                    }
+                }
+            };
+
+            xhr.onload = function () {
+                if (xhr.status === 200 || xhr.status === 302) {
+                    window.location.href = '/ads';
+                } else {
+                    alert(MSG_UPLOAD_ERROR + xhr.responseText);
+                    resetUploadUI();
+                }
+            };
+
+            xhr.onerror = function () {
+                alert(MSG_NETWORK_ERROR);
+                resetUploadUI();
+            };
+
+            xhr.send(formData);
+
+            function resetUploadUI() {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = MSG_UPLOAD_BTN;
+                submitBtn.style.background = '';
+                progressContainer.style.display = 'none';
+            }
+        });
+
+        async function updateDiskSpace() {
+            try {
+                const res = await fetch('/ads/disk-space');
+                const data = await res.json();
+                if (data.success) {
+                    document.getElementById('diskSpaceText').innerText = `${data.free} / ${data.total} (${data.use})`;
+                } else {
+                    document.getElementById('diskSpaceText').innerText = MSG_DISK_UNKNOWN;
+                }
+            } catch (e) { }
+        }
+
+        updateDiskSpace();
+
+        async function addToSlot(videoId, slotId) {
+            const cell = document.getElementById(`cell-${videoId}-${slotId}`);
+            if (!cell) return;
+            const originalHtml = cell.innerHTML;
+            cell.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+            try {
+                const response = await fetch('/ads/add-to-slot', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ videoId, slotId })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    SLOT_COUNTS[slotId] = data.slotCount;
+                    updateRow(videoId, data.slots);
+                } else {
+                    const error = await response.text();
+                    alert(MSG_ERROR + error);
+                    cell.innerHTML = originalHtml;
+                }
+            } catch (err) {
+                alert(MSG_SERVER_ERROR);
+                cell.innerHTML = originalHtml;
+            }
+        }
+
+        let pendingDelete = null;
+
+        function confirmRemove(videoId, slotId) {
+            const videoName = document.getElementById(`video-name-${videoId}`).innerText;
+            const slotName = SLOT_LABELS[slotId] || slotId;
+            const isLastInSlot = SLOT_COUNTS[slotId] <= 1;
+
+            pendingDelete = { videoId, slotId };
+            document.getElementById('deleteMsg').innerText = MSG_CONFIRM_REMOVE.replace('%s', videoName).replace('%s', slotName);
+
+            const warnEl = document.getElementById('deleteWarning');
+            warnEl.innerText = MSG_LAST_WARN;
+            warnEl.style.display = isLastInSlot ? 'block' : 'none';
+
+            document.getElementById('deleteModal').style.display = 'block';
+        }
+
+        document.getElementById('confirmDeleteBtn').onclick = async () => {
+            if (!pendingDelete) return;
+            const { videoId, slotId } = pendingDelete;
+            closeModal('deleteModal');
+
+            const cell = document.getElementById(`cell-${videoId}-${slotId}`);
+            if (!cell) return;
+            const originalHtml = cell.innerHTML;
+            cell.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+            try {
+                const response = await fetch('/ads/remove-from-slot', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ videoId, slotId })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    SLOT_COUNTS[slotId] = data.slotCount;
+                    if (data.slots.length === 0) {
+                        const row = document.getElementById(`video-row-${videoId}`);
+                        if (row) row.remove();
+                    } else {
+                        updateRow(videoId, data.slots);
+                    }
+                } else {
+                    const error = await response.text();
+                    alert(MSG_ERROR + error);
+                    cell.innerHTML = originalHtml;
+                }
+            } catch (err) {
+                alert(MSG_SERVER_ERROR);
+                cell.innerHTML = originalHtml;
+            }
+        };
+
+        function updateRow(videoId, activeSlots) {
+            const activeSlotsStr = activeSlots.map(String);
+            for (const slotId in SLOT_LABELS) {
+                const cell = document.getElementById(`cell-${videoId}-${slotId}`);
+                if (!cell) continue;
+
+                const isActive = activeSlotsStr.includes(String(slotId));
+
+                if (isActive) {
+                    let btnClass = 'btn-delete';
+                    let icon = slotId === 'old' ? 'fa-fire' : 'fa-trash';
+                    let title = slotId === 'old' ? MSG_REMOVE_PERM : MSG_REMOVE_SLOT;
+
+                    cell.innerHTML = `
+                        <button class="action-btn ${btnClass}" title="${title}"
+                                onclick="confirmRemove('${videoId}', '${slotId}')">
+                            <i class="fas ${icon}"></i>
+                        </button>`;
+                } else {
+                    let icon = slotId === 'old' ? 'fa-archive' : 'fa-plus';
+                    let title = slotId === 'old' ? MSG_MOVE_ARCHIVE : MSG_ADD_SLOT;
+
+                    cell.innerHTML = `
+                        <button class="action-btn btn-add" title="${title}"
+                                onclick="addToSlot('${videoId}', '${slotId}')">
+                            <i class="fas ${icon}"></i>
+                        </button>`;
+                }
+            }
+        }
+
+        const viewPlaylistBtn = document.getElementById('viewPlaylistBtn');
+        if (viewPlaylistBtn) {
+            viewPlaylistBtn.addEventListener('click', async () => {
+                document.getElementById('playlistModal').style.display = 'block';
+                const tbody = document.getElementById('playlistTableBody');
+                tbody.innerHTML = `<tr><td colspan="4" style="padding:15px; text-align:center;">${MSG_LOADING}</td></tr>`;
+                try {
+                    const res = await fetch('/ads/playlist');
+                    const data = await res.json();
+                    if (data.success) {
+                        tbody.innerHTML = '';
+                        if (data.playlist.length === 0) {
+                            tbody.innerHTML = `<tr><td colspan="4" style="padding:15px; text-align:center;">${MSG_EMPTY_SCHED}</td></tr>`;
+                            return;
+                        }
+                        const browserDate = new Date();
+                        const utcMs = browserDate.getTime() + (browserDate.getTimezoneOffset() * 60000);
+                        const channelDate = new Date(utcMs + (data.timezoneOffset * 3600000));
+
+                        const channelMinutes = (channelDate.getHours() * 60) + channelDate.getMinutes();
+                        const channelSeconds = (channelMinutes * 60) + channelDate.getSeconds();
+
+                        let currentItemEl = null;
+
+                        data.playlist.forEach(item => {
+                            const tr = document.createElement('tr');
+
+                            const [h, m, s] = item.formatted_time.split(':').map(Number);
+                            const itemStartSeconds = (h * 3600) + (m * 60) + s;
+                            const itemEndSeconds = itemStartSeconds + Math.round(item.duration / 1000);
+
+                            const isCurrent = (channelSeconds >= itemStartSeconds && channelSeconds < itemEndSeconds);
+
+                            if (isCurrent) {
+                                tr.style.fontWeight = 'bold';
+                                tr.style.backgroundColor = '#fff9c4';
+                                currentItemEl = tr;
+                            }
+
+                            const time = item.formatted_time || new Date(item.start_time).toLocaleTimeString(lang === "ru" ? "ru-RU" : "en-US", { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                            const name = item.display_name || item.filename;
+                            const durationSec = Math.round(item.duration / 1000);
+                            const mins = Math.floor(durationSec / 60);
+                            const secs = String(durationSec % 60).padStart(2, '0');
+
+                            let slotName = item.slot_name || '';
+                            let color = '#333';
+                            let weight = 'normal';
+
+                            if (item.entry_type === 'filler') {
+                                slotName = 'fall / filler';
+                                color = '#6c757d';
+                            } else if (item.exclude_from_stats) {
+                                slotName = slotName || 'out of stats';
+                                color = '#6c757d';
+                            } else if (item.entry_type === 'main') {
+                                slotName = 'main';
+                                color = '#28a745';
+                                weight = 'bold';
+                            } else {
+                                slotName = slotName || 'Ad';
+                                color = '#155724';
+                                weight = 'bold';
+                            }
+
+                            tr.innerHTML = `
+                                <td style="padding: 10px 8px; border-bottom: 1px solid #eee; white-space: nowrap; text-align: left;">${time}</td>
+                                <td style="padding: 10px 8px; border-bottom: 1px solid #eee; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left;" title="${name}">${name}</td>
+                                <td style="padding: 10px 8px; border-bottom: 1px solid #eee; white-space: nowrap; text-align: left; color: ${color}; font-weight: ${weight};">${slotName}</td>
+                                <td style="padding: 10px 8px; border-bottom: 1px solid #eee; white-space: nowrap; text-align: left;">${mins}:${secs}</td>
+                            `;
+                            tbody.appendChild(tr);
+                        });
+
+                        if (currentItemEl) {
+                            setTimeout(() => {
+                                currentItemEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }, 100);
+                        }
+                    } else {
+                        tbody.innerHTML = `<tr><td colspan="4" style="padding:15px; color:red; text-align:center;">${MSG_ERROR}${data.error}</td></tr>`;
+                    }
+                } catch (err) {
+                    tbody.innerHTML = `<tr><td colspan="4" style="padding:15px; color:red; text-align:center;">${MSG_SERVER_ERROR}</td></tr>`;
+                }
+            });
+        }
+    </script>
+</body>
+
+</html>

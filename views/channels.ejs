@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="<%= lang %>">
+
+<head>
+    <meta charset="UTF-8">
+    <title><%= t.channels_title %></title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f7f6;
+            margin: 0;
+            padding: 0;
+        }
+
+        .navbar {
+            background-color: #333;
+            overflow: hidden;
+            padding: 0 20px;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .navbar a {
+            float: left;
+            display: block;
+            color: #f2f2f2;
+            text-align: center;
+            padding: 14px 16px;
+            text-decoration: none;
+            font-size: 17px;
+        }
+
+        .navbar a:hover {
+            background-color: #ddd;
+            color: black;
+        }
+
+        .navbar a.active {
+            background-color: #007bff;
+            color: white;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 30px auto;
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        th,
+        td {
+            padding: 12px;
+            border: 1px solid #ddd;
+            text-align: left;
+        }
+
+        th {
+            background: #f8f9fa;
+        }
+
+        .status-active {
+            color: #2ecc71;
+            font-weight: bold;
+        }
+
+        .status-stopped {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+
+        .status-error {
+            color: #e67e22;
+            font-weight: bold;
+        }
+
+        .btn {
+            padding: 8px 12px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            color: white;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 13px;
+        }
+
+        .btn-start {
+            background-color: #2ecc71;
+        }
+
+        .btn-stop {
+            background-color: #e74c3c;
+        }
+
+        .btn-delete {
+            background-color: #95a5a6;
+        }
+
+        .btn-create {
+            background-color: #3498db;
+            font-size: 15px;
+            padding: 10px 15px;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+            height: 38px;
+        }
+
+        .create-form-row {
+            display: flex;
+            gap: 15px;
+            align-items: flex-end;
+            flex-wrap: wrap;
+        }
+
+        .create-form-row .form-group {
+            margin-bottom: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .create-form-row label {
+            min-height: 40px;
+            display: flex;
+            align-items: flex-end;
+            margin-bottom: 8px;
+        }
+
+        .create-form {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #eee;
+            margin-bottom: 30px;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: 10% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 450px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .navbar {
+            background-color: #333;
+            overflow: hidden;
+            padding: 0 20px;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .navbar a {
+            float: left;
+            display: block;
+            color: #f2f2f2;
+            text-align: center;
+            padding: 14px 16px;
+            text-decoration: none;
+            font-size: 17px;
+        }
+
+        .navbar a:hover {
+            background-color: #ddd;
+            color: black;
+        }
+
+        .navbar a.active {
+            background-color: #007bff;
+            color: white;
+        }
+        .lang-switcher { display:flex; gap:4px; align-items:center; }
+        .lang-switcher .lang-btn { 
+            padding:3px 10px; 
+            border:1px solid rgba(255,255,255,0.4); 
+            border-radius:4px; 
+            background:transparent !important; 
+            color:white !important; 
+            font-size:12px; 
+            cursor:pointer; 
+            transition: all 0.2s; 
+            margin: 0 !important;
+            width: auto !important;
+            height: auto !important;
+            line-height: normal !important;
+        }
+        .lang-switcher .lang-btn.active { background:rgba(255,255,255,0.2) !important; font-weight:bold; border-color:rgba(255,255,255,0.6); }
+        .lang-switcher .lang-btn:hover { background:rgba(255,255,255,0.1) !important; }
+    </style>
+</head>
+
+<body>
+    <div class="navbar" style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+            <a href="/" class=""><%= t.nav_reports %></a>
+            <a href="/ads" class=""><%= t.nav_content %></a>
+            <a href="/watch" class=""><%= t.nav_watch %></a>
+            <a href="/health" class=""><%= t.nav_health %></a>
+            <% if (typeof username !=='undefined' && username==='admin' ) { %>
+                <a href="/admin" class=""><%= t.nav_admin_slots %></a>
+                <a href="/admin/channels" class="active"><%= t.nav_admin_channels %></a>
+                <a href="/admin/receivers" class=""><%= t.nav_admin_receivers %></a>
+                <% } %>
+        </div>
+        <div style="display:flex; align-items:center; padding-right:16px;">
+            <div class="channel-selector" style="margin-right:20px;">
+                <select onchange="if(typeof switchChannel === 'function') switchChannel(this.value);"
+                    style="padding:4px; border-radius:4px; border:1px solid #ccc; background:#fff; font-size:14px; cursor:pointer;">
+                    <% if (typeof channels !=='undefined' && channels.length> 0) { %>
+                        <% channels.forEach(ch=> { %>
+                            <option value="<%= ch.id %>" <%=typeof currentChannelId !=='undefined' &&
+                                ch.id===currentChannelId ? 'selected' : '' %>><%= t.nav_channel %>: <%= ch.name %>
+                            </option>
+                            <% }); %>
+                                <% } else { %>
+                                    <option value="1"><%= t.nav_channel %>: <%= t.nav_channel_main %></option>
+                                    <% } %>
+                </select>
+            </div>
+            <div class="lang-switcher" style="margin-right:16px;">
+                <form method="POST" action="/set-lang" style="display:inline;">
+                    <input type="hidden" name="lang" value="en">
+                    <button type="submit" class="lang-btn <%= lang === 'en' ? 'active' : '' %>">EN</button>
+                </form>
+                <form method="POST" action="/set-lang" style="display:inline;">
+                    <input type="hidden" name="lang" value="ru">
+                    <button type="submit" class="lang-btn <%= lang === 'ru' ? 'active' : '' %>">RU</button>
+                </form>
+            </div>
+            <a href="/logout" style="float:none;"><%= t.nav_logout %></a>
+        </div>
+    </div>
+    <script>
+        if (typeof window.switchChannel === 'undefined') {
+            window.switchChannel = function (id) {
+                fetch('/admin/channels/switch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channel_id: id })
+                }).then(() => window.location.reload());
+            }
+        }
+    </script>
+
+    <div class="container">
+        <h2><%= t.channels_h2 %></h2>
+        <p><%= t.channels_desc %></p>
+
+        <div class="create-form">
+            <h3><%= t.channels_create_h3 %></h3>
+            <div class="create-form-row">
+                <div class="form-group" style="flex:2; min-width: 200px;">
+                    <label><%= t.channels_label_name %></label>
+                    <input type="text" id="newName" placeholder="<%= t.channels_placeholder_name %>">
+                </div>
+                <div class="form-group" style="flex:1; min-width: 120px;">
+                    <label><%= t.channels_label_ip %></label>
+                    <input type="text" id="newIp" value="226.0.0.X">
+                </div>
+                <div class="form-group" style="flex:1; min-width: 100px;">
+                    <label><%= t.channels_label_port %></label>
+                    <input type="number" id="newPort" value="5004">
+                </div>
+                <div class="form-group" style="flex:1; min-width: 150px;">
+                    <label><%= t.channels_label_format %></label>
+                    <select id="newProtocol">
+                        <option value="udp">UDP (TSDuck)</option>
+                        <option value="rtp">RTP (FFmpeg MPEG-TS)</option>
+                    </select>
+                </div>
+                <div class="form-group" style="flex:1; min-width: 100px;">
+                    <label><%= t.channels_label_timezone %></label>
+                    <input type="number" id="newTimezone" value="3"
+                        title="<%= t.channels_timezone_title %>">
+                </div>
+                <div style="flex:0 0 auto;">
+                    <button class="btn btn-create" onclick="createChannel()"><%= t.channels_btn_create %></button>
+                </div>
+            </div>
+        </div>
+
+        <table id="channelsTable">
+            <thead>
+                <tr>
+                    <th><%= t.channels_th_id %></th>
+                    <th><%= t.channels_th_name %></th>
+                    <th><%= t.channels_th_address %></th>
+                    <th><%= t.channels_th_status %></th>
+                    <th><%= t.channels_th_actions %></th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Channels will be loaded here dynamically -->
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Edit Modal -->
+    <div id="editModal" class="modal">
+        <div class="modal-content">
+            <h3><%= t.channels_edit_h3_prefix %><span id="editChannelIdText"></span></h3>
+            <input type="hidden" id="editChannelId">
+            <div class="form-group">
+                <label><%= t.channels_label_name %></label>
+                <input type="text" id="editName">
+            </div>
+            <div class="form-group">
+                <label><%= t.channels_label_ip %></label>
+                <input type="text" id="editIp">
+            </div>
+            <div class="form-group">
+                <label><%= t.channels_label_port %></label>
+                <input type="number" id="editPort">
+            </div>
+            <div class="form-group">
+                <label><%= t.channels_label_format %></label>
+                <select id="editProtocol" style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;">
+                    <option value="udp">UDP (TSDuck)</option>
+                    <option value="rtp">RTP (FFmpeg MPEG-TS)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label><%= t.channels_label_interface %></label>
+                <select id="editInterfaceIp"
+                    style="width:100%; padding:8px; border:1px solid #ccc; border-radius:4px;"></select>
+                <small style="color:gray;"><%= t.channels_interface_hint %></small>
+            </div>
+            <div class="form-group">
+                <label><%= t.channels_label_timezone %></label>
+                <input type="number" id="editTimezone" value="3">
+                <small style="color:gray;"><%= t.channels_tz_hint %></small>
+            </div>
+            <div class="form-group">
+                <label><%= t.channels_label_bitrate %></label>
+                <input type="number" id="editBitrate" value="5000">
+                <small style="color:gray;"><%= t.channels_bitrate_hint %></small>
+            </div>
+            <div style="text-align: right; margin-top: 20px;">
+                <button class="btn btn-delete" onclick="closeEditModal()"><%= t.channels_btn_cancel %></button>
+                <button class="btn btn-create" onclick="saveChannelSettings()"><%= t.channels_btn_apply %></button>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        // i18n strings
+        const MSG_STATUS_ACTIVE   = <%- JSON.stringify(t.channels_status_active) %>;
+        const MSG_STATUS_STOPPED  = <%- JSON.stringify(t.channels_status_stopped) %>;
+        const MSG_STATUS_ERROR    = <%- JSON.stringify(t.channels_status_error) %>;
+        const MSG_FILL_ALL        = <%- JSON.stringify(t.channels_js_fill_all) %>;
+        const MSG_ERROR           = <%- JSON.stringify(t.channels_js_error) %>;
+        const MSG_NET_ERROR       = <%- JSON.stringify(t.channels_js_net_error) %>;
+        const MSG_CONFIRM_DELETE  = <%- JSON.stringify(t.channels_js_confirm_delete) %>;
+        const MSG_LOADING         = <%- JSON.stringify(t.channels_loading) %>;
+        const BTN_SETTINGS        = <%- JSON.stringify(t.channels_btn_settings) %>;
+        const BTN_STOP            = <%- JSON.stringify(t.channels_btn_stop) %>;
+        const BTN_START           = <%- JSON.stringify(t.channels_btn_start) %>;
+        const BTN_DELETE          = <%- JSON.stringify(t.channels_btn_delete) %>;
+
+        async function loadChannels() {
+            try {
+                const response = await fetch('/admin/channels/list');
+                const data = await response.json();
+                if (data.success) {
+                    const tbody = document.querySelector('#channelsTable tbody');
+                    tbody.innerHTML = '';
+                    data.channels.forEach(ch => {
+                        let statusClass = 'status-stopped';
+                        let statusText = MSG_STATUS_STOPPED;
+
+                        if (ch.status === 'active') {
+                            statusClass = 'status-active';
+                            statusText = MSG_STATUS_ACTIVE;
+                        } else if (ch.status === 'error') {
+                            statusClass = 'status-error';
+                            statusText = MSG_STATUS_ERROR;
+                        }
+
+                        const tr = document.createElement('tr');
+
+                        const nameEnc = encodeURIComponent(ch.name);
+                        const ipEnc = ch.interface_ip || '172.16.88.223';
+                        const bitEnc = ch.ffmpeg_bitrate_k || 5000;
+
+                        tr.innerHTML = `
+                            <td>${ch.id}</td>
+                            <td><strong>${ch.name}</strong></td>
+                            <td>${ch.protocol.toUpperCase()}://${ch.multicast_ip}:${ch.multicast_port} <br><small style="color:#666">GMT${ch.timezone_offset > 0 ? '+' : ''}${ch.timezone_offset}</small></td>
+                            <td class="${statusClass}">${statusText}</td>
+                            <td>
+                                <button class="btn btn-create" onclick="openEditModal(${ch.id}, '${nameEnc}', '${ch.multicast_ip}', ${ch.multicast_port}, '${ipEnc}', ${bitEnc}, '${ch.protocol}', ${ch.timezone_offset || 3})" style="margin-right: 5px; background-color: #f39c12;">${BTN_SETTINGS}</button>
+                                ${ch.status === 'active'
+                                ? `<button class="btn btn-stop" onclick="actionChannel(${ch.id}, 'stop')">${BTN_STOP}</button>`
+                                : `<button class="btn btn-start" onclick="actionChannel(${ch.id}, 'start')">${BTN_START}</button>`
+                            }
+                                <button class="btn btn-delete" onclick="deleteChannel(${ch.id})" style="margin-left: 5px;">${BTN_DELETE}</button>
+                            </td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                }
+            } catch (e) {
+                console.error("Failed to load channel data", e);
+            }
+        }
+
+        let loadedInterfaces = null;
+
+        async function fetchInterfaces() {
+            if (loadedInterfaces) return loadedInterfaces;
+            try {
+                const res = await fetch('/admin/channels/interfaces');
+                const data = await res.json();
+                if (data.success) {
+                    loadedInterfaces = data.interfaces;
+                    return loadedInterfaces;
+                }
+            } catch (e) { console.error("Could not fetch interfaces", e); }
+            return ['172.16.88.223'];
+        }
+
+        async function openEditModal(id, nameEnc, mcastIp, mcastPort, interfaceIp, bitrateK, protocol, timezoneOffset) {
+            document.getElementById('editChannelIdText').innerText = id;
+            document.getElementById('editChannelId').value = id;
+            document.getElementById('editName').value = decodeURIComponent(nameEnc);
+            document.getElementById('editIp').value = mcastIp;
+            document.getElementById('editPort').value = mcastPort;
+            document.getElementById('editBitrate').value = bitrateK;
+            document.getElementById('editProtocol').value = protocol || 'udp';
+            document.getElementById('editTimezone').value = timezoneOffset || 3;
+
+            const select = document.getElementById('editInterfaceIp');
+            select.innerHTML = `<option>${MSG_LOADING}</option>`;
+            document.getElementById('editModal').style.display = 'block';
+
+            const interfaces = await fetchInterfaces();
+            select.innerHTML = '';
+
+            if (!interfaces.includes(interfaceIp)) {
+                const opt = document.createElement('option');
+                opt.value = interfaceIp;
+                opt.text = interfaceIp;
+                select.appendChild(opt);
+            }
+
+            interfaces.forEach(ip => {
+                const opt = document.createElement('option');
+                opt.value = ip;
+                opt.text = ip;
+                if (ip === interfaceIp) opt.selected = true;
+                select.appendChild(opt);
+            });
+        }
+
+        function closeEditModal() {
+            document.getElementById('editModal').style.display = 'none';
+        }
+
+        async function saveChannelSettings() {
+            const id = document.getElementById('editChannelId').value;
+            const name = document.getElementById('editName').value;
+            const ip = document.getElementById('editIp').value;
+            const port = document.getElementById('editPort').value;
+            const interfaceIp = document.getElementById('editInterfaceIp').value;
+            const bitrateK = document.getElementById('editBitrate').value;
+            const protocol = document.getElementById('editProtocol').value;
+            const timezoneOffset = document.getElementById('editTimezone').value;
+
+            if (!name || !ip || !port || !interfaceIp || !bitrateK || !protocol || !timezoneOffset) return alert(MSG_FILL_ALL);
+
+            try {
+                const res = await fetch(`/admin/channels/${id}/edit`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, multicast_ip: ip, multicast_port: port, interface_ip: interfaceIp, ffmpeg_bitrate_k: bitrateK, protocol, timezone_offset: timezoneOffset })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    closeEditModal();
+                    loadChannels();
+                } else {
+                    alert(MSG_ERROR + data.error);
+                }
+            } catch (e) { alert(MSG_NET_ERROR); }
+        }
+
+        async function createChannel() {
+            const name = document.getElementById('newName').value;
+            const ip = document.getElementById('newIp').value;
+            const port = document.getElementById('newPort').value;
+            const protocol = document.getElementById('newProtocol').value;
+            const timezoneOffset = document.getElementById('newTimezone').value;
+            if (!name || !ip || !port || !protocol || !timezoneOffset) return alert(MSG_FILL_ALL);
+
+            try {
+                const res = await fetch('/admin/channels', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, multicast_ip: ip, multicast_port: port, protocol, timezone_offset: timezoneOffset })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    document.getElementById('newName').value = '';
+                    loadChannels();
+                } else {
+                    alert(MSG_ERROR + data.error);
+                }
+            } catch (e) { alert(MSG_NET_ERROR); }
+        }
+
+        async function actionChannel(id, action) {
+            try {
+                const res = await fetch(`/admin/channels/${id}/${action}`, { method: 'POST' });
+                const data = await res.json();
+                if (!data.success) alert(MSG_ERROR + data.error);
+                loadChannels();
+            } catch (e) { alert(MSG_NET_ERROR); }
+        }
+
+        async function deleteChannel(id) {
+            if (!confirm(MSG_CONFIRM_DELETE.replace('%s', id))) return;
+            try {
+                const res = await fetch(`/admin/channels/${id}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (!data.success) alert(MSG_ERROR + data.error);
+                loadChannels();
+            } catch (e) { alert(MSG_NET_ERROR); }
+        }
+
+        // Initial load
+        loadChannels();
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,79 @@
+services:
+  mariadb:
+    image: mariadb:10.6
+    container_name: tv_db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-Vosemdig1896}
+      MYSQL_DATABASE: ${DB_NAME:-tv_stats}
+      MYSQL_USER: ${DB_USER:-logger}
+      MYSQL_PASSWORD: ${DB_PASS:-password}
+    volumes:
+      - ./mariadb_data:/var/lib/mysql
+    networks:
+      - tv_network
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: [ "CMD", "healthcheck.sh", "--connect", "--innodb_initialized" ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  tv_site:
+    build:
+      context: ./tv_site
+      dockerfile: Dockerfile
+    container_name: tv_site
+    restart: always
+    environment:
+      - PORT=3000
+      - DB_HOST=mariadb
+      - DB_NAME=${DB_NAME:-tv_stats}
+      - DB_USER=${DB_USER:-logger}
+      - DB_PASS=${DB_PASS:-password}
+      - ERSATZTV_URL=${ERSATZTV_URL:-http://127.0.0.1:8409}
+      - ERSATZTV_CHANNEL_ID=${ERSATZTV_CHANNEL_ID:-1}
+      - SESSION_SECRET=${SESSION_SECRET:-change_me}
+      - ADS_BASE_PATH=/opt/tv_station/media/ads/
+      - ADDR=${ADDR:-172.16.88.223}
+    ports:
+      - "3000:3000"
+      - "5555:5555/udp"
+    volumes:
+      - ./media:/opt/tv_station/media
+      - ./uploads_temp:/opt/tv_station/tv_site/uploads_temp
+      - ./logs:/opt/tv_station/tv_site/logs
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /dev/shm:/dev/shm:ro
+    networks:
+      - tv_network
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:3000/login" ]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # Build-only targets to ensure images are ready for the dynamic container service
+  tv_playout_base:
+    build:
+      context: .
+      dockerfile: Scripts/Dockerfile.playout
+    image: tv_station-tv_playout
+    restart: "no"
+    entrypoint: [ "echo", "Base image built" ]
+
+  tsduck_base:
+    build:
+      context: .
+      dockerfile: Dockerfile.tsduck
+    image: tv_station-tsduck_ch2
+    restart: "no"
+    entrypoint: [ "echo", "Base image built" ]
+
+networks:
+  tv_network:
+    driver: bridge

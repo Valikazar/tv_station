@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="<%= lang %>">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= t.report_title_prefix %> <%= startDate %> <%= t.report_title_to %> <%= endDate %>
+    </title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f7f6;
+            margin: 0;
+            padding: 0;
+        }
+
+        .navbar {
+            background-color: #333;
+            overflow: hidden;
+            padding: 0 20px;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .navbar a {
+            float: left;
+            display: block;
+            color: #f2f2f2;
+            text-align: center;
+            padding: 14px 16px;
+            text-decoration: none;
+            font-size: 17px;
+        }
+
+        .navbar a:hover {
+            background-color: #ddd;
+            color: black;
+        }
+
+        .navbar a.active {
+            background-color: #007bff;
+            color: white;
+        }
+
+
+        .main-content {
+            padding: 20px;
+            padding-top: 10px;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            margin: 0;
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            text-decoration: none;
+            color: white;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+
+        .btn-blue {
+            background-color: #007bff;
+        }
+
+        .btn-green {
+            background-color: #28a745;
+        }
+
+        .btn-red {
+            background-color: #dc3545;
+        }
+
+        .table-container {
+            overflow-x: visible;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 1000px;
+        }
+
+        th,
+        td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            background-color: #f8f9fa;
+            position: sticky;
+            top: 48px;
+            z-index: 20;
+            font-weight: 600;
+            white-space: nowrap;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        th.file-col {
+            left: 0;
+            z-index: 30;
+            background-color: #f8f9fa;
+            box-shadow: 2px 0 4px rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        tr:hover {
+            background-color: #f1f1f1;
+        }
+
+        .slot-col {
+            width: 60px;
+            text-align: center;
+        }
+
+        .total-col {
+            font-weight: bold;
+            width: 60px;
+            text-align: center;
+            background-color: #fafafa;
+        }
+
+        .file-col {
+            font-weight: 500;
+            color: #333;
+            width: 250px;
+            max-width: 250px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            position: sticky;
+            left: 0;
+            background-color: white;
+            z-index: 10;
+            box-shadow: 2px 0 4px rgba(0, 0, 0, 0.05);
+        }
+
+        .lang-switcher { display:flex; gap:4px; align-items:center; }
+        .lang-switcher .lang-btn { 
+            padding:3px 10px; 
+            border:1px solid rgba(255,255,255,0.4); 
+            border-radius:4px; 
+            background:transparent !important; 
+            color:white !important; 
+            font-size:12px; 
+            cursor:pointer; 
+            transition: all 0.2s; 
+            margin: 0 !important;
+            width: auto !important;
+            height: auto !important;
+            line-height: normal !important;
+        }
+        .lang-switcher .lang-btn.active { background:rgba(255,255,255,0.2) !important; font-weight:bold; border-color:rgba(255,255,255,0.6); }
+        .lang-switcher .lang-btn:hover { background:rgba(255,255,255,0.1) !important; }
+
+    </style>
+</head>
+
+<body>
+    <div class="navbar" style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+            <a href="/" class="active"><%= t.nav_reports %></a>
+            <a href="/ads" class=""><%= t.nav_content %></a>
+            <a href="/watch" class=""><%= t.nav_watch %></a>
+            <a href="/health" class=""><%= t.nav_health %></a>
+            <% if (typeof username !=='undefined' && username==='admin' ) { %>
+                <a href="/admin" class=""><%= t.nav_admin_slots %></a>
+                <a href="/admin/channels" class=""><%= t.nav_admin_channels %></a>
+                <a href="/admin/receivers" class=""><%= t.nav_admin_receivers %></a>
+                <% } %>
+        </div>
+        <div style="display:flex; align-items:center; padding-right:16px;">
+            <div class="channel-selector" style="margin-right:20px;">
+                <select onchange="if(typeof switchChannel === 'function') switchChannel(this.value);"
+                    style="padding:4px; border-radius:4px; border:1px solid #ccc; background:#fff; font-size:14px; cursor:pointer;">
+                    <% if (typeof channels !=='undefined' && channels.length> 0) { %>
+                        <% channels.forEach(ch=> { %>
+                            <option value="<%= ch.id %>" <%=typeof currentChannelId !=='undefined' &&
+                                ch.id===currentChannelId ? 'selected' : '' %>><%= t.nav_channel %>: <%= ch.name %>
+                            </option>
+                            <% }); %>
+                                <% } else { %>
+                                    <option value="1"><%= t.nav_channel %>: <%= t.nav_channel_main %></option>
+                                    <% } %>
+                </select>
+            </div>
+            <div class="lang-switcher" style="margin-right:16px;">
+                <form method="POST" action="/set-lang" style="display:inline;">
+                    <input type="hidden" name="lang" value="en">
+                    <button type="submit" class="lang-btn <%= lang === 'en' ? 'active' : '' %>">EN</button>
+                </form>
+                <form method="POST" action="/set-lang" style="display:inline;">
+                    <input type="hidden" name="lang" value="ru">
+                    <button type="submit" class="lang-btn <%= lang === 'ru' ? 'active' : '' %>">RU</button>
+                </form>
+            </div>
+            <a href="/logout" style="float:none;"><%= t.nav_logout %></a>
+        </div>
+    </div>
+    <script>
+        if (typeof window.switchChannel === 'undefined') {
+            window.switchChannel = function(id) {
+                fetch('/admin/channels/switch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channel_id: id })
+                }).then(() => {
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete('channel_id');
+                    window.location.href = url.href;
+                });
+            }
+        }
+    </script>
+    <div class="main-content">
+        <header>
+            <div>
+                <a href="/" class="btn btn-blue">&larr; <%= t.report_btn_back %></a>
+                <h1><%= t.report_h1_prefix %> <%= startDate %> <%= t.report_h1_to %> <%= endDate %>
+                </h1>
+            </div>
+            <div class="controls">
+
+                <button class="btn" style="background: #6c757d; cursor: pointer; border: none; font-size: 14px;"
+                    onclick="location.reload()">
+                    <i class="fas fa-sync-alt"></i> <%= t.report_btn_refresh %>
+                </button>
+                <a href="/download/xlsx?startDate=<%= startDate %>&endDate=<%= endDate %>&type=<%= type %>"
+                    class="btn btn-green"><%= t.report_btn_excel %></a>
+                <a href="/download/pdf?startDate=<%= startDate %>&endDate=<%= endDate %>&type=<%= type %>"
+                    class="btn btn-red"><%= t.report_btn_pdf %></a>
+            </div>
+        </header>
+
+        <div class="table-container">
+            <table>
+                <thead>
+                    <tr>
+                        <th class="file-col"><%= t.report_th_title %></th>
+                        <th class="total-col"><%= t.report_th_total %></th>
+                        <th class="total-col"><%= t.report_th_in_breaks %></th>
+                        <% slots.forEach(function(slot) { %>
+                            <th class="slot-col" title="<%= slot.duration %> min">
+                                <%= slot.name %>
+                            </th>
+                            <% }); %>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% if (stats.length===0) { %>
+                        <tr>
+                            <td colspan="<%= 3 + slots.length %>" style="text-align:center; padding: 20px;"><%= t.report_no_data %></td>
+                        </tr>
+                        <% } %>
+
+                            <% stats.forEach(function(item) { %>
+                                <tr>
+                                    <td class="file-col">
+                                        <%= item.display_name %>
+                                    </td>
+                                    <td class="total-col">
+                                        <%= item.total %>
+                                    </td>
+                                    <td class="total-col">
+                                        <%= item.inBreaks %>
+                                    </td>
+                                    <% slots.forEach(function(slot) { %>
+                                        <td class="slot-col <%= item.slots[slot.name] === 0 ? 'zero' : '' %>">
+                                            <%= item.slots[slot.name] %>
+                                        </td>
+                                        <% }); %>
+                                </tr>
+                                <% }); %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+
+</html>

@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="<%= lang %>">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= t.index_title %></title>
+    <!-- Flatpickr CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f7f6;
+            margin: 0;
+            padding: 0;
+        }
+
+        .navbar {
+            background-color: #333;
+            overflow: hidden;
+            padding: 0 20px;
+            position: sticky;
+            top: 0;
+            z-index: 1000;
+        }
+
+        .navbar a {
+            float: left;
+            display: block;
+            color: #f2f2f2;
+            text-align: center;
+            padding: 14px 16px;
+            text-decoration: none;
+            font-size: 17px;
+        }
+
+        .navbar a:hover {
+            background-color: #ddd;
+            color: black;
+        }
+
+        .navbar a.active {
+            background-color: #007bff;
+            color: white;
+        }
+
+        .main-content {
+            padding: 40px;
+        }
+
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #333;
+        }
+
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        label {
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #555;
+        }
+
+        input {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+
+        .preset-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 10px;
+        }
+
+        .preset-btn {
+            padding: 6px 12px;
+            font-size: 12px;
+            background: #e9ecef;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .preset-btn:hover {
+            background: #dde2e6;
+        }
+
+        button[type="submit"] {
+            margin-top: 10px;
+            padding: 12px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+
+        button[type="submit"]:hover {
+            background: #0056b3;
+        }
+
+        .lang-switcher { display:flex; gap:4px; align-items:center; }
+        .lang-switcher .lang-btn { 
+            padding:3px 10px; 
+            border:1px solid rgba(255,255,255,0.4); 
+            border-radius:4px; 
+            background:transparent !important; 
+            color:white !important; 
+            font-size:12px; 
+            cursor:pointer; 
+            transition: all 0.2s; 
+            margin: 0 !important;
+            width: auto !important;
+            height: auto !important;
+            line-height: normal !important;
+        }
+        .lang-switcher .lang-btn.active { background:rgba(255,255,255,0.2) !important; font-weight:bold; border-color:rgba(255,255,255,0.6); }
+        .lang-switcher .lang-btn:hover { background:rgba(255,255,255,0.1) !important; }
+    </style>
+</head>
+
+<body>
+    <div class="navbar" style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+            <a href="/" class="active"><%= t.nav_reports %></a>
+            <a href="/ads" class=""><%= t.nav_content %></a>
+            <a href="/watch" class=""><%= t.nav_watch %></a>
+            <a href="/health" class=""><%= t.nav_health %></a>
+            <% if (typeof username !== 'undefined' && username === 'admin') { %>
+                <a href="/admin" class=""><%= t.nav_admin_slots %></a>
+                <a href="/admin/channels" class=""><%= t.nav_admin_channels %></a>
+                <a href="/admin/receivers" class=""><%= t.nav_admin_receivers %></a>
+            <% } %>
+        </div>
+        <div style="display:flex; align-items:center; padding-right:16px;">
+            <div class="channel-selector" style="margin-right:20px;">
+                <select onchange="if(typeof switchChannel === 'function') switchChannel(this.value);" style="padding:4px; border-radius:4px; border:1px solid #ccc; background:#fff; font-size:14px; cursor:pointer;">
+                    <% if (typeof channels !== 'undefined' && channels.length > 0) { %>
+                        <% channels.forEach(ch => { %>
+                            <option value="<%= ch.id %>" <%= typeof currentChannelId !== 'undefined' && ch.id === currentChannelId ? 'selected' : '' %>><%= t.nav_channel %>: <%= ch.name %></option>
+                        <% }); %>
+                    <% } else { %>
+                        <option value="1"><%= t.nav_channel %>: <%= t.nav_channel_main %></option>
+                    <% } %>
+                </select>
+            </div>
+            <div class="lang-switcher" style="margin-right:16px;">
+                <form method="POST" action="/set-lang" style="display:inline;">
+                    <input type="hidden" name="lang" value="en">
+                    <button type="submit" class="lang-btn <%= lang === 'en' ? 'active' : '' %>">EN</button>
+                </form>
+                <form method="POST" action="/set-lang" style="display:inline;">
+                    <input type="hidden" name="lang" value="ru">
+                    <button type="submit" class="lang-btn <%= lang === 'ru' ? 'active' : '' %>">RU</button>
+                </form>
+            </div>
+            <a href="/logout" style="float:none;"><%= t.nav_logout %></a>
+        </div>
+    </div>
+    <script>
+        if (typeof window.switchChannel === 'undefined') {
+            window.switchChannel = function(id) {
+                fetch('/admin/channels/switch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channel_id: id })
+                }).then(() => {
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete('channel_id');
+                    window.location.href = url.href;
+                });
+            }
+        }
+    </script>
+    <div class="main-content">
+        <div class="container">
+            <h1><%= t.index_h1 %></h1>
+
+            <div class="preset-buttons">
+                <button type="button" class="preset-btn" onclick="setDateRange(0)"><%= t.index_preset_today %></button>
+                <button type="button" class="preset-btn" onclick="setDateRange(6)"><%= t.index_preset_7days %></button>
+                <button type="button" class="preset-btn" onclick="setDateRange(30)"><%= t.index_preset_30days %></button>
+                <button type="button" class="preset-btn" onclick="setMonth()"><%= t.index_preset_this_month %></button>
+                <button type="button" class="preset-btn" onclick="setLastMonth()"><%= t.index_preset_last_month %></button>
+                <button type="button" class="preset-btn" onclick="setYear()"><%= t.index_preset_year %></button>
+            </div>
+
+            <form action="/report" method="GET">
+                <div>
+                    <label for="dateRange"><%= t.index_label_date_range %></label>
+                    <input type="text" id="dateRange" placeholder="<%= t.index_placeholder_date %>">
+                    <!-- Hidden inputs for backend -->
+                    <input type="hidden" id="startDate" name="startDate">
+                    <input type="hidden" id="endDate" name="endDate">
+                </div>
+                <button type="submit"><%= t.index_btn_generate %></button>
+            </form>
+        </div>
+
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <% if (lang === 'ru') { %>
+    <script src="https://npmcdn.com/flatpickr/dist/l10n/ru.js"></script>
+    <% } %>
+    <script>
+        const fp = flatpickr("#dateRange", {
+            mode: "range",
+            dateFormat: "Y-m-d",
+            <% if (lang === 'ru') { %>locale: "ru",<% } %>
+            onClose: function (selectedDates, dateStr, instance) {
+                if (selectedDates.length === 2) {
+                    document.getElementById('startDate').value = flatpickr.formatDate(selectedDates[0], "Y-m-d");
+                    document.getElementById('endDate').value = flatpickr.formatDate(selectedDates[1], "Y-m-d");
+                } else if (selectedDates.length === 1) {
+                    document.getElementById('startDate').value = flatpickr.formatDate(selectedDates[0], "Y-m-d");
+                    document.getElementById('endDate').value = flatpickr.formatDate(selectedDates[0], "Y-m-d");
+                }
+            }
+        });
+
+        function setDate(start, end) {
+            fp.setDate([start, end]);
+            document.getElementById('startDate').value = flatpickr.formatDate(start, "Y-m-d");
+            document.getElementById('endDate').value = flatpickr.formatDate(end, "Y-m-d");
+        }
+
+        function setDateRange(daysBack) {
+            const end = new Date();
+            const start = new Date();
+            start.setDate(end.getDate() - daysBack);
+            setDate(start, end);
+        }
+
+        function setMonth() {
+            const now = new Date();
+            const start = new Date(now.getFullYear(), now.getMonth(), 1);
+            const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+            setDate(start, end);
+        }
+
+        function setLastMonth() {
+            const now = new Date();
+            const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+            const end = new Date(now.getFullYear(), now.getMonth(), 0);
+            setDate(start, end);
+        }
+
+        function setYear() {
+            const now = new Date();
+            const start = new Date(now.getFullYear(), 0, 1);
+            const end = new Date(now.getFullYear(), 11, 31);
+            setDate(start, end);
+        }
+
+        // Set default to this month on load
+        setMonth();
+    </script>
+</body>
+
+</html>

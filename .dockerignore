@@ -1,0 +1,20 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.dockerignore
+media
+uploads_temp
+logs
+mariadb_data
+Dockerfile
+Dockerfile.*
+docker-compose.yml
+.env
+*.ps1
+
+# Playout scripts are needed for the tv_playout build
+!Scripts/playout.py
+!Scripts/generate_playlist.py
+!Scripts/playout_entrypoint.sh
+!Scripts/Dockerfile.playout

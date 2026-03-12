@@ -1,0 +1,14 @@
+[Unit]
+Description=Playout Master FFmpeg (Ch2) - Continuous FIFO-to-UDP bridge
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStartPre=/usr/bin/bash -c "test -p /tmp/playout_fifo || mkfifo /tmp/playout_fifo && chmod 666 /tmp/playout_fifo"
+ExecStart=/usr/bin/ffmpeg -hide_banner -loglevel warning -thread_queue_size 1024 -probesize 10000000 -analyzeduration 10000000 -f mpegts -i /tmp/playout_fifo -map 0 -c copy -f mpegts -muxrate 7000k -pcr_period 20 "udp://127.0.0.1:10010?pkt_size=1316&flush_packets=1&buffer_size=10000000"
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

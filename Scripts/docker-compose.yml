@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  tsduck_ch2:
+    build:
+      context: .
+      dockerfile: Dockerfile.tsduck
+    container_name: tv_fec_ch2
+    restart: always
+    network_mode: host
+    command: >
+      -v -I ip --buffer-size 10000000 10010 -P pcrbitrate --min-pcr 4 --min-pid 1 -P continuity --fix -P regulate --bitrate 7000000 -O ip --local-address 172.16.88.223 --packet-burst 7 --enforce-burst --ttl 10 226.0.0.21:5004
+
+  # --- 5.1. ПЛЕЙАУТ (КАНАЛ 2) ---
+  tv_playout:
+    build:
+      context: .
+      dockerfile: Dockerfile.playout
+    container_name: tv_playout
+    restart: always
+    network_mode: host
+    volumes:
+      - ./media:/media
+      - /dev/shm:/dev/shm
+    environment:
+      DB_HOST: "127.0.0.1"
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASS: ${DB_PASS}
+      MEDIA_DIR: "/media/new_ads/"
+      TZ: "Europe/Moscow"
+    depends_on:
+      - mariadb
+
+  # --- 6. БАЗА ДАННЫХ ---
+  mariadb:
+    image: mariadb:10.6
+    container_name: tv_db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - ./mariadb_data:/var/lib/mysql
+    networks:
+      - default
+    ports:
+      - "3306:3306"
