@@ -10,7 +10,7 @@ MASTER_PID=""
 cleanup() {
     echo "=== Cleanup triggered for Channel $CHANNEL_ID ==="
     # Kill feeder ffmpeg processes writing to our FIFO
-    pkill -9 -f "ffmpeg.*pipe:1" 2>/dev/null || true
+    pkill -9 -f "title=feeder_ch${CHANNEL_ID}" 2>/dev/null || true
     # Kill the master ffmpeg reading our FIFO
     if [ -n "$MASTER_PID" ] && kill -0 "$MASTER_PID" 2>/dev/null; then
         echo "Killing master FFmpeg PID $MASTER_PID..."
@@ -30,10 +30,10 @@ trap cleanup EXIT SIGTERM SIGINT
 echo "=== TV Playout Container Starting (Channel $CHANNEL_ID) ==="
 echo "Time: $(date)"
 
-# ─── 1. Kill any stale ffmpeg from a previous (crashed) run ──────────────────
-echo "Killing any stale ffmpeg processes from previous run..."
-pkill -9 -f "ffmpeg.*${FIFO_PATH}" 2>/dev/null || true
-pkill -9 -f "ffmpeg.*pipe:1" 2>/dev/null || true
+# 1. Kill any stale ffmpeg for THIS channel only from a previous (crashed) run ──
+echo "Killing any stale ffmpeg processes for channel $CHANNEL_ID..."
+pkill -9 -f "title=feeder_ch${CHANNEL_ID}" 2>/dev/null || true
+pkill -9 -f "${FIFO_PATH}" 2>/dev/null || true
 sleep 0.5
 
 # ─── 2. Create FIFO ──────────────────────────────────────────────────────────
@@ -76,7 +76,8 @@ fi
     touch "/dev/shm/ch${CHANNEL_ID}_master.log"
     chmod 666 "/dev/shm/ch${CHANNEL_ID}_master.log"
     ffmpeg -re -hide_banner -loglevel warning -stats \
-      -fflags +igndts+discardcorrupt \
+      -thread_queue_size 4096 \
+      -fflags +genpts+igndts+discardcorrupt \
       -err_detect ignore_err \
       -probesize 10000000 -analyzeduration 10000000 \
       -f mpegts -i "$FIFO_PATH" \

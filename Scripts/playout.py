@@ -24,7 +24,8 @@ def kill_stale_feeders():
         lines = result.stdout.strip().split('\n')
         own_pid = os.getpid()
         for line in lines:
-            if 'ffmpeg' in line and '-f mpegts' in line and 'pipe:1' in line:
+            # Only kill feeders belonging to THIS channel to avoid cross-channel interference
+            if 'ffmpeg' in line and f'title=feeder_ch{CHANNEL_ID}' in line:
                 parts = line.split()
                 if len(parts) > 1 and parts[1].isdigit():
                     pid = int(parts[1])
@@ -171,11 +172,13 @@ class PlayoutSender:
             self._last_decision_key = message
             self._last_decision_time = now
 
-    def get_next_item(self, silent=False):
-        now = datetime.now()
+    def get_next_item(self, current_time=None, silent=False):
+        if current_time is None:
+            current_time = datetime.now()
+        
         if not silent:
             # Diagnostic: log current time being used for DB lookup
-            self.log_decision(f"[Decision] Checking schedule for time: {now.strftime('%H:%M:%S')}")
+            self.log_decision(f"[Decision] Checking schedule for position: {current_time.strftime('%H:%M:%S')} (Wall: {datetime.now().strftime('%H:%M:%S')})")
         cursor = self.get_db_cursor()
         
         # Find what SHOULD be playing right now, excluding the one we just finished
@@ -186,7 +189,7 @@ class PlayoutSender:
                 WHERE gp.start_time <= %s AND DATE_ADD(gp.start_time, INTERVAL gp.duration/1000 SECOND) > %s 
                 AND gp.id != %s AND gp.channel_id = %s
                 ORDER BY gp.start_time DESC LIMIT 1"""
-            cursor.execute(query_current, (now, now, self.last_played_id, CHANNEL_ID))
+            cursor.execute(query_current, (current_time, current_time, self.last_played_id, CHANNEL_ID))
         else:
             query_current = """SELECT gp.id, gp.video_id, gp.start_time, gp.duration, gp.filename, gp.entry_type, IFNULL(ts.exclude_from_stats, 0) as exclude_from_stats
                 FROM generated_playlists gp
@@ -194,7 +197,7 @@ class PlayoutSender:
                 WHERE gp.start_time <= %s AND DATE_ADD(gp.start_time, INTERVAL gp.duration/1000 SECOND) > %s 
                 AND gp.channel_id = %s
                 ORDER BY gp.start_time DESC LIMIT 1"""
-            cursor.execute(query_current, (now, now, CHANNEL_ID))
+            cursor.execute(query_current, (current_time, current_time, CHANNEL_ID))
         
         current = cursor.fetchone()
         if current:
@@ -207,7 +210,7 @@ class PlayoutSender:
             FROM generated_playlists gp
             LEFT JOIN time_slots ts ON gp.slot_id = ts.id
             WHERE gp.start_time > %s AND gp.channel_id = %s ORDER BY gp.start_time ASC LIMIT 1"""
-        cursor.execute(query_next, (now, CHANNEL_ID))
+        cursor.execute(query_next, (current_time, CHANNEL_ID))
         nxt = cursor.fetchone()
         if nxt:
             if not silent:
@@ -339,9 +342,10 @@ class PlayoutSender:
 
         bitrate_k = int(os.environ.get('FFMPEG_BITRATE_K', 5000))
 
-        # We transcode to ensure stable PTS and format for the Master FFmpeg
+        # Timing Swap: Remove '-re' from feeder. The Master FFmpeg now controls the clock.
+        # This allows the feeder to encode ahead and fill the buffer.
         cmd = [
-            'ffmpeg', '-re', '-ss', f"{seek_seconds:.3f}",
+            'ffmpeg', '-ss', f"{seek_seconds:.3f}",
             '-fflags', '+igndts+discardcorrupt',
             '-err_detect', 'ignore_err',
             '-i', filepath
@@ -366,12 +370,14 @@ class PlayoutSender:
             '-c:a', 'aac', '-b:a', '192k', '-ac', '2', '-ar', '48000',
             '-af', 'aresample=48000:async=1',
             '-flags', '+global_header',
+            '-metadata', f'title=feeder_ch{CHANNEL_ID}',
             '-output_ts_offset', f"{self.ts_offset:.3f}",
             '-f', 'mpegts',
             'pipe:1'
         ]
 
         logging.info(f"Feeding FIFO with {filename} (seek={seek_seconds:.1f}s, ts_offset={self.ts_offset:.1f}s)...")
+        logging.debug(f"FFmpeg command: {' '.join(cmd)}")
         self.log_playback_start(video_id, exclude=exclude_from_stats)
         stream_start = time.monotonic()
         
@@ -399,7 +405,7 @@ class PlayoutSender:
                 if self.writer_error:
                     raise self.writer_error
 
-                chunk = self.process.stdout.read(131072)
+                chunk = self.process.stdout.read(262144) # 256KB buffer for smoother FIFO write
                 if not chunk:
                     break
                 self.q.put(chunk)
@@ -429,21 +435,23 @@ class PlayoutSender:
             
             return True
         except Exception as e:
+            self._master_crashed = True
+            self.ts_offset = 0.0
+            self.stream_start_time = datetime.now()
+            self.clear_queue()
+            
             if 'Broken pipe' in str(e) or 'Errno 32' in str(e) or isinstance(e, BrokenPipeError):
                 logging.error(f"Broken pipe detected — master FFmpeg likely died. Resetting stream.")
-                self.clear_queue()
-                self._master_crashed = True
-                self.ts_offset = 0.0
-                time.sleep(2)
-                try:
-                    self.fifo_handle.close()
-                except:
-                    pass
-                self.fifo_handle = open(FIFO_PATH, 'wb')
-                logging.info("FIFO re-opened, ts_offset reset to 0.")
             else:
                 logging.error(f"Feeder error: {e}")
-                time.sleep(2)
+            
+            time.sleep(2)
+            try:
+                self.fifo_handle.close()
+            except:
+                pass
+            self.fifo_handle = open(FIFO_PATH, 'wb')
+            logging.info("FIFO re-opened, ts_offset and stream_start_time reset.")
             return False
         finally:
             wall_elapsed = time.monotonic() - stream_start
@@ -488,14 +496,21 @@ class PlayoutSender:
             logging.info(f"File done/stopped: {filename}, {bytes_written // 1024}KB, elapsed={wall_elapsed:.1f}s (exact={actual_duration:.2f}s), next_offset={self.ts_offset:.3f}s")
 
     def run(self):
-        logging.info("Starting FIFO Feeder Loop...")
+        logging.info("Starting FIFO Feeder Loop (Timing Swap Mode)...")
+        self.stream_start_time = datetime.now()
+        
         while True:
-            item, status = self.get_next_item()
-            now = datetime.now()
+            # Timing Swap: calculate current stream position relative to start + offset
+            # This allows the feeder to be ahead of wall-clock time
+            current_stream_time = self.stream_start_time + timedelta(seconds=self.ts_offset)
+            
+            item, status = self.get_next_item(current_time=current_stream_time)
+            
             if status == "current":
-                seek = (now - item['start_time']).total_seconds()
+                # Calculate seek based on virtual stream time, not actual wall clock
+                seek = (current_stream_time - item['start_time']).total_seconds()
                 remaining = item['duration'] / 1000.0 - seek
-                if remaining < 1.0:
+                if remaining < 0.5:
                     self.last_played_id = item['id']
                     continue
                 result = self.stream_file(item['filename'], seek_seconds=seek, duration_limit=remaining, video_id=item['video_id'], exclude_from_stats=item.get('exclude_from_stats', False))
@@ -504,11 +519,13 @@ class PlayoutSender:
                     self.regenerate_playlist()
             elif status == "next":
                 if item:
-                    wait = (item['start_time'] - now).total_seconds()
-                    if wait > 2.0: # Stability fix: ignore gaps < 2s to avoid flashing filler
+                    wait = (item['start_time'] - current_stream_time).total_seconds()
+                    if wait > 1.0: 
                         filler = self.get_filler()
                         if filler: self.stream_file(filler['filename'], duration_limit=wait, video_id=filler['id'], exclude_from_stats=False, is_filler=True)
-                        else: time.sleep(min(wait, 5))
+                        else: 
+                            # If no filler, we physically have to wait because we can't push "silence" without a file
+                            time.sleep(min(wait, 2))
                     else:
                         result = self.stream_file(item['filename'], duration_limit=item['duration'] / 1000.0, video_id=item['video_id'], exclude_from_stats=item.get('exclude_from_stats', False))
                         self.last_played_id = item['id']
@@ -517,9 +534,9 @@ class PlayoutSender:
                 else:
                     filler = self.get_filler()
                     if filler: self.stream_file(filler['filename'], video_id=filler['id'], is_filler=True)
-                    else: time.sleep(5)
+                    else: time.sleep(2)
             else:
-                 time.sleep(5)
+                 time.sleep(2)
 
 if __name__ == "__main__":
     import signal
