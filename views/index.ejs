@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><%= t.index_title %></title>
     <!-- Flatpickr CSS -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <link rel="stylesheet" href="/css/vendor/flatpickr.min.css">
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -219,9 +219,9 @@
         </div>
 
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="/js/vendor/flatpickr.min.js"></script>
     <% if (lang === 'ru') { %>
-    <script src="https://npmcdn.com/flatpickr/dist/l10n/ru.js"></script>
+    <script src="/js/vendor/flatpickr.ru.js"></script>
     <% } %>
     <script>
         const fp = flatpickr("#dateRange", {
