@@ -161,7 +161,7 @@ export async function startBeaconStream(interfaceIp: string) {
             "-P", "pat", "--create", "--add-service", "0x0001/0x100",
             "-P", "pmt", "--create", "--service", "0x0001",
             "-P", "sdt", "--create", "--service", "0x0001", "--provider", serverUrl, "--name", "TV-Beacon",
-            "-P", "regulate", "--bitrate", "1000000",
+            "-P", "regulate", "--bitrate", "100000",
             "-O", "ip", "--local-address", interfaceIp, "--ttl", "10",
             "226.0.0.1:5004"
         ],

@@ -14,6 +14,7 @@ import channelRoutes from './routes/channelRoutes';
 import receiverRoutes from './routes/receiverRoutes';
 import { createAndStartChannelContainers } from './services/dockerService';
 import { initializeSlots } from './utils/timeSlots';
+import { startScheduler } from './services/scheduleManager';
 import dgram from 'dgram';
 
 // Extend express-session types
@@ -202,7 +203,7 @@ initializeSlots().then(async () => {
         const [activeChannels] = await pool.execute<RowDataPacket[]>('SELECT id FROM channels WHERE status = "active"');
         for (const ch of activeChannels) {
             console.log(`[Auto-Start] Restoring active containers for Channel ${ch.id}...`);
-            await createAndStartChannelContainers(ch.id).catch(e => console.error(`Failed to restore Channel ${ch.id}:`, e));
+            await createAndStartChannelContainers(ch.id).catch((e: any) => console.error(`Failed to restore Channel ${ch.id}:`, e));
         }
     } catch (e) {
         console.error('Failed to sync active channels with Docker:', e);
@@ -210,8 +211,9 @@ initializeSlots().then(async () => {
     app.listen(port, () => {
         console.log(`Server running at http://localhost:${port}`);
         startUdpDiscovery();
+        startScheduler();
     });
-}).catch(err => {
+}).catch((err: any) => {
     console.error('Failed to initialize, starting with defaults:', err);
     app.listen(port, () => {
         console.log(`Server running at http://localhost:${port}`);
