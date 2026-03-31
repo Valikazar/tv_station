@@ -127,12 +127,30 @@ router.post('/upload', uploadMiddleware, async (req: Request, res: Response) => 
         // Convert to numbers where appropriate
         const slotIds = selectedSlots.map((id: string) => isNaN(Number(id)) ? id : Number(id));
 
-        const originalName = file.originalname;
+        let originalName = file.originalname;
+
+        // If uploaded file is an image, convert it to a 15-second video
+        if (file.mimetype.startsWith('image/')) {
+            console.log(`[Upload] Image detected: ${originalName}. Converting to 15s MP4...`);
+            const tempVideoPath = file.path + '_converted.mp4';
+            // Generate a 15s video from the image with a silent audio track
+            const ffmpegCmd = `ffmpeg -y -loop 1 -framerate 30 -i "${file.path}" -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 -c:v libx264 -t 15 -pix_fmt yuv420p -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2" -c:a aac -shortest "${tempVideoPath}"`;
+            
+            await execAsync(ffmpegCmd);
+            
+            // Clean up original image and update file references
+            await fs.promises.unlink(file.path).catch(e => console.error('Error removing original image:', e));
+            file.path = tempVideoPath;
+            file.mimetype = 'video/mp4';
+            originalName = `${path.parse(originalName).name}.mp4`;
+            file.originalname = originalName;
+            console.log(`[Upload] Image conversion successful. New name: ${originalName}`);
+        }
 
         // Check duration and validate video
         const duration = await getVideoDuration(file.path);
         if (duration < 0) {
-            await fs.promises.unlink(file.path);
+            await fs.promises.unlink(file.path).catch(() => {});
             return res.status(400).send('Invalid video file or format. Could not determine duration.');
         }
 

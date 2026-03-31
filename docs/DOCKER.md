@@ -359,7 +359,6 @@ cp .env.example .env
 | `DB_PASS` | ✅ | — | Database user password |
 | `SESSION_SECRET` | ✅ | — | Express session signing secret |
 | `ADDR` | ✅ | `172.16.88.223` | Server LAN IP (in SDT beacon and discovery replies) |
-| `ERSATZTV_URL` | — | `http://127.0.0.1:8409` | Legacy — not used in current version |
 | `ADS_BASE_PATH` | — | `/opt/tv_station/media/ads/` | Base path for ad files |
 
 ---

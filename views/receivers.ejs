@@ -201,7 +201,7 @@
                 
                 data.forEach(r => {
                     const lastSeen = new Date(r.last_seen);
-                    const isOnline = (new Date() - lastSeen) < 30000; // 30 seconds threshold
+                    const isOnline = !!r.is_online;
                     const statusClass = isOnline ? 'status-online' : 'status-offline';
                     const statusText = isOnline ? '<%= t.receivers_status_online %>' : '<%= t.receivers_status_offline %>';
 

@@ -139,7 +139,12 @@ router.post('/report', async (req: Request, res: Response) => {
 // Admin routes for receivers (will be protected by requireAuth in app.ts)
 router.get('/', async (req: Request, res: Response) => {
     try {
-        const [rows] = await pool.execute('SELECT * FROM receivers ORDER BY last_seen DESC');
+        const [rows] = await pool.execute(`
+            SELECT *, 
+            (TIMESTAMPDIFF(SECOND, last_seen, CURRENT_TIMESTAMP) < 60) AS is_online 
+            FROM receivers 
+            ORDER BY last_seen DESC
+        `);
         res.json(rows);
     } catch (err) {
         console.error('Error fetching receivers:', err);

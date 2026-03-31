@@ -32,8 +32,6 @@ services:
       - DB_NAME=${DB_NAME:-tv_stats}
       - DB_USER=${DB_USER:-logger}
       - DB_PASS=${DB_PASS:-password}
-      - ERSATZTV_URL=${ERSATZTV_URL:-http://127.0.0.1:8409}
-      - ERSATZTV_CHANNEL_ID=${ERSATZTV_CHANNEL_ID:-1}
       - SESSION_SECRET=${SESSION_SECRET:-change_me}
       - ADS_BASE_PATH=/opt/tv_station/media/ads/
       - ADDR=${ADDR:-172.16.88.223}
