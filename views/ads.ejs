@@ -363,32 +363,39 @@
                                 <% slots.forEach(function(slot) { %>
                                     <td id="cell-<%= video.id %>-<%= slot.dbId %>">
                                         <% if (activeSlots.includes(slot.dbId)) { %>
-                                            <button class="action-btn btn-delete"
-                                                onclick="confirmRemove('<%= video.id %>', '<%= slot.dbId %>')">
-                                                <i class="fas fa-trash"></i>
-                                            </button>
-                                            <% } else { %>
-                                                <button class="action-btn btn-add"
-                                                    onclick="addToSlot('<%= video.id %>', '<%= slot.dbId %>')">
-                                                    <i class="fas fa-plus"></i>
+                                            <% const isUnmuted = video.parsedUnmutedSlots && video.parsedUnmutedSlots.includes(slot.dbId); %>
+                                            <div style="display:flex; justify-content:center; gap:5px;">
+                                                <button class="action-btn" style="background-color: <%= isUnmuted ? '#17a2b8' : '#6c757d' %>; color: white;" title="<%= isUnmuted ? 'Выключить звук' : 'Включить звук' %>" onclick="toggleMute('<%= video.id %>', '<%= slot.dbId %>')">
+                                                    <i class="fas <%= isUnmuted ? 'fa-volume-up' : 'fa-volume-mute' %>"></i>
                                                 </button>
-                                                <% } %>
+                                                <button class="action-btn btn-delete" onclick="confirmRemove('<%= video.id %>', '<%= slot.dbId %>')">
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
+                                            </div>
+                                        <% } else { %>
+                                            <button class="action-btn btn-add" onclick="addToSlot('<%= video.id %>', '<%= slot.dbId %>')">
+                                                <i class="fas fa-plus"></i>
+                                            </button>
+                                        <% } %>
                                     </td>
                                     <% }); %>
                                         <% if (showArchived) { %>
-                                            <td id="cell-<%= video.id %>-<%= archiveSlot.id %>"
-                                                style="background-color: #fffafa;">
+                                            <td id="cell-<%= video.id %>-<%= archiveSlot.id %>" style="background-color: #fffafa;">
                                                 <% if (activeSlots.includes(archiveSlot.id)) { %>
-                                                    <button class="action-btn btn-delete" title="<%= t.ads_js_remove_permanently %>"
-                                                        onclick="confirmRemove('<%= video.id %>', '<%= archiveSlot.id %>')">
-                                                        <i class="fas fa-fire"></i>
-                                                    </button>
-                                                    <% } else { %>
-                                                        <button class="action-btn btn-add" title="<%= t.ads_js_move_to_archive %>"
-                                                            onclick="addToSlot('<%= video.id %>', '<%= archiveSlot.id %>')">
-                                                            <i class="fas fa-archive"></i>
+                                                    <% const isArchUnmuted = video.parsedUnmutedSlots && video.parsedUnmutedSlots.includes(archiveSlot.id); %>
+                                                    <div style="display:flex; justify-content:center; gap:5px;">
+                                                        <button class="action-btn" style="background-color: <%= isArchUnmuted ? '#17a2b8' : '#6c757d' %>; color: white;" title="<%= isArchUnmuted ? 'Выключить звук' : 'Включить звук' %>" onclick="toggleMute('<%= video.id %>', '<%= archiveSlot.id %>')">
+                                                            <i class="fas <%= isArchUnmuted ? 'fa-volume-up' : 'fa-volume-mute' %>"></i>
                                                         </button>
-                                                        <% } %>
+                                                        <button class="action-btn btn-delete" title="<%= t.ads_js_remove_permanently %>" onclick="confirmRemove('<%= video.id %>', '<%= archiveSlot.id %>')">
+                                                            <i class="fas fa-fire"></i>
+                                                        </button>
+                                                    </div>
+                                                <% } else { %>
+                                                    <button class="action-btn btn-add" title="<%= t.ads_js_move_to_archive %>" onclick="addToSlot('<%= video.id %>', '<%= archiveSlot.id %>')">
+                                                        <i class="fas fa-archive"></i>
+                                                    </button>
+                                                <% } %>
                                             </td>
                                             <% } %>
                                                 <td style="white-space: nowrap;">
@@ -694,7 +701,7 @@
                 if (response.ok) {
                     const data = await response.json();
                     SLOT_COUNTS[slotId] = data.slotCount;
-                    updateRow(videoId, data.slots);
+                    updateRow(videoId, data.slots, data.unmutedSlots);
                 } else {
                     const error = await response.text();
                     alert(MSG_ERROR + error);
@@ -747,7 +754,7 @@
                         const row = document.getElementById(`video-row-${videoId}`);
                         if (row) row.remove();
                     } else {
-                        updateRow(videoId, data.slots);
+                        updateRow(videoId, data.slots, data.unmutedSlots);
                     }
                 } else {
                     const error = await response.text();
@@ -760,13 +767,58 @@
             }
         };
 
-        function updateRow(videoId, activeSlots) {
+        async function toggleMute(videoId, slotId) {
+            const cell = document.getElementById(`cell-${videoId}-${slotId}`);
+            if (!cell) return;
+            const originalHtml = cell.innerHTML;
+            cell.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+            try {
+                const response = await fetch('/ads/toggle-mute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ videoId, slotId })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    
+                    const isUnmuted = data.isUnmuted;
+                    let btnClass = 'btn-delete';
+                    let icon = slotId === 'old' ? 'fa-fire' : 'fa-trash';
+                    let title = slotId === 'old' ? MSG_REMOVE_PERM : MSG_REMOVE_SLOT;
+
+                    cell.innerHTML = `
+                        <div style="display:flex; justify-content:center; gap:5px;">
+                            <button class="action-btn" style="background-color: ${isUnmuted ? '#17a2b8' : '#6c757d'}; color: white;" title="${isUnmuted ? 'Выключить звук' : 'Включить звук'}" onclick="toggleMute('${videoId}', '${slotId}')">
+                                <i class="fas ${isUnmuted ? 'fa-volume-up' : 'fa-volume-mute'}"></i>
+                            </button>
+                            <button class="action-btn ${btnClass}" title="${title}"
+                                    onclick="confirmRemove('${videoId}', '${slotId}')">
+                                <i class="fas ${icon}"></i>
+                            </button>
+                        </div>`;
+                } else {
+                    const error = await response.text();
+                    alert(MSG_ERROR + error);
+                    cell.innerHTML = originalHtml;
+                }
+            } catch (err) {
+                alert(MSG_SERVER_ERROR);
+                cell.innerHTML = originalHtml;
+            }
+        }
+
+        function updateRow(videoId, activeSlots, unmutedSlots = []) {
             const activeSlotsStr = activeSlots.map(String);
+            const unmutedSlotsStr = unmutedSlots.map(String);
+            
             for (const slotId in SLOT_LABELS) {
                 const cell = document.getElementById(`cell-${videoId}-${slotId}`);
                 if (!cell) continue;
 
                 const isActive = activeSlotsStr.includes(String(slotId));
+                const isUnmuted = unmutedSlotsStr.includes(String(slotId));
 
                 if (isActive) {
                     let btnClass = 'btn-delete';
@@ -774,10 +826,15 @@
                     let title = slotId === 'old' ? MSG_REMOVE_PERM : MSG_REMOVE_SLOT;
 
                     cell.innerHTML = `
-                        <button class="action-btn ${btnClass}" title="${title}"
-                                onclick="confirmRemove('${videoId}', '${slotId}')">
-                            <i class="fas ${icon}"></i>
-                        </button>`;
+                        <div style="display:flex; justify-content:center; gap:5px;">
+                            <button class="action-btn" style="background-color: ${isUnmuted ? '#17a2b8' : '#6c757d'}; color: white;" title="${isUnmuted ? 'Выключить звук' : 'Включить звук'}" onclick="toggleMute('${videoId}', '${slotId}')">
+                                <i class="fas ${isUnmuted ? 'fa-volume-up' : 'fa-volume-mute'}"></i>
+                            </button>
+                            <button class="action-btn ${btnClass}" title="${title}"
+                                    onclick="confirmRemove('${videoId}', '${slotId}')">
+                                <i class="fas ${icon}"></i>
+                            </button>
+                        </div>`;
                 } else {
                     let icon = slotId === 'old' ? 'fa-archive' : 'fa-plus';
                     let title = slotId === 'old' ? MSG_MOVE_ARCHIVE : MSG_ADD_SLOT;
@@ -839,6 +896,10 @@
                             let slotName = item.slot_name || '';
                             let color = '#333';
                             let weight = 'normal';
+                            
+                            const muteBadge = item.unmuted 
+                                ? ' <i class="fas fa-volume-up" style="color: #28a745; font-size: 10px; margin-left: 5px;" title="Со звуком"></i>'
+                                : ' <i class="fas fa-volume-mute" style="color: #6c757d; font-size: 10px; margin-left: 5px;" title="Без звука"></i>';
 
                             if (item.entry_type === 'filler') {
                                 slotName = 'fall / filler';
@@ -858,7 +919,7 @@
 
                             tr.innerHTML = `
                                 <td style="padding: 10px 8px; border-bottom: 1px solid #eee; white-space: nowrap; text-align: left;">${time}</td>
-                                <td style="padding: 10px 8px; border-bottom: 1px solid #eee; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left;" title="${name}">${name}</td>
+                                <td style="padding: 10px 8px; border-bottom: 1px solid #eee; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left;" title="${name}">${name} ${muteBadge}</td>
                                 <td style="padding: 10px 8px; border-bottom: 1px solid #eee; white-space: nowrap; text-align: left; color: ${color}; font-weight: ${weight};">${slotName}</td>
                                 <td style="padding: 10px 8px; border-bottom: 1px solid #eee; white-space: nowrap; text-align: left;">${mins}:${secs}</td>
                             `;

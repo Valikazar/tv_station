@@ -111,6 +111,56 @@
             padding: 10px 15px;
         }
 
+        .btn-watch {
+            background-color: #8e44ad;
+        }
+
+        /* ── HLS inline player ── */
+        #hlsPlayerOverlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.82);
+            z-index: 3000;
+            justify-content: center;
+            align-items: center;
+        }
+        #hlsPlayerOverlay.active { display: flex; }
+        #hlsPlayerBox {
+            background: #111;
+            border-radius: 12px;
+            padding: 16px;
+            width: min(90vw, 900px);
+            box-shadow: 0 8px 40px rgba(0,0,0,0.7);
+            position: relative;
+        }
+        #hlsPlayerTitle {
+            color: #fff;
+            font-size: 15px;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+        #hlsPlayerClose {
+            position: absolute;
+            top: 12px; right: 16px;
+            background: none; border: none;
+            color: #aaa; font-size: 24px; cursor: pointer;
+            line-height: 1;
+        }
+        #hlsPlayerClose:hover { color: #fff; }
+        #hlsVideo {
+            width: 100%;
+            border-radius: 8px;
+            background: #000;
+            max-height: 70vh;
+        }
+        #hlsStatus {
+            color: #aaa;
+            font-size: 13px;
+            margin-top: 8px;
+            min-height: 18px;
+        }
+
         .form-group {
             margin-bottom: 15px;
         }
@@ -325,6 +375,7 @@
                     <th><%= t.channels_th_address %></th>
                     <th><%= t.channels_th_status %></th>
                     <th><%= t.channels_th_actions %></th>
+                    <th>HLS</th>
                 </tr>
             </thead>
             <tbody>
@@ -420,6 +471,7 @@
                         const nameEnc = encodeURIComponent(ch.name);
                         const ipEnc = ch.interface_ip || '172.16.88.223';
                         const bitEnc = ch.ffmpeg_bitrate_k || 5000;
+                        const isActive = ch.status === 'active';
 
                         tr.innerHTML = `
                             <td>${ch.id}</td>
@@ -428,11 +480,17 @@
                             <td class="${statusClass}">${statusText}</td>
                             <td>
                                 <button class="btn btn-create" onclick="openEditModal(${ch.id}, '${nameEnc}', '${ch.multicast_ip}', ${ch.multicast_port}, '${ipEnc}', ${bitEnc}, '${ch.protocol}', ${ch.timezone_offset || 3})" style="margin-right: 5px; background-color: #f39c12;">${BTN_SETTINGS}</button>
-                                ${ch.status === 'active'
+                                ${isActive
                                 ? `<button class="btn btn-stop" onclick="actionChannel(${ch.id}, 'stop')">${BTN_STOP}</button>`
                                 : `<button class="btn btn-start" onclick="actionChannel(${ch.id}, 'start')">${BTN_START}</button>`
                             }
                                 <button class="btn btn-delete" onclick="deleteChannel(${ch.id})" style="margin-left: 5px;">${BTN_DELETE}</button>
+                            </td>
+                            <td>
+                                ${isActive
+                                ? `<button class="btn btn-watch" onclick="openHlsPlayer(${ch.id}, '${ch.name}')" title="Watch channel preview">► Watch</button>`
+                                : `<span style="color:#bbb;font-size:12px;">—</span>`
+                                }
                             </td>
                         `;
                         tbody.appendChild(tr);
@@ -568,7 +626,97 @@
 
         // Initial load
         loadChannels();
+
+        // ─── HLS Player ───────────────────────────────────────────────────────
+        let currentHlsChannelId = null;
+        let hlsPingInterval = null;
+        let hls = null;
+
+        async function openHlsPlayer(channelId, channelName) {
+            currentHlsChannelId = channelId;
+            document.getElementById('hlsPlayerTitle').textContent = '▶ ' + channelName;
+            document.getElementById('hlsStatus').textContent = 'Starting HLS stream...';
+            document.getElementById('hlsPlayerOverlay').classList.add('active');
+
+            try {
+                const res = await fetch(`/admin/channels/${channelId}/hls/start`, { method: 'POST' });
+                const data = await res.json();
+                if (!data.success) throw new Error(data.error);
+
+                document.getElementById('hlsStatus').textContent = 'Buffering... (may take ~10s)';
+                // Countdown while waiting for fresh segments
+                let countdown = 10;
+                const cdTimer = setInterval(() => {
+                    countdown--;
+                    document.getElementById('hlsStatus').textContent = `Buffering... (${countdown}s)`;
+                    if (countdown <= 0) clearInterval(cdTimer);
+                }, 1000);
+                await new Promise(r => setTimeout(r, 10000));
+                clearInterval(cdTimer);
+
+                const video = document.getElementById('hlsVideo');
+                // Add cache-buster so browser fetches fresh playlist, not cached filler
+                const hlsUrl = data.url + '?_t=' + Date.now();
+                if (Hls.isSupported()) {
+                    if (hls) { hls.destroy(); }
+                    hls = new Hls({ liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 6 });
+                    hls.loadSource(hlsUrl);
+                    hls.attachMedia(video);
+                    hls.on(Hls.Events.MANIFEST_PARSED, () => { video.play(); document.getElementById('hlsStatus').textContent = 'Live ●'; });
+                    hls.on(Hls.Events.ERROR, (_, d) => {
+                        if (d.fatal) document.getElementById('hlsStatus').textContent = 'Stream error: ' + d.details;
+                    });
+                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                    video.src = hlsUrl;
+                    video.play();
+                }
+
+                // Heartbeat every 30s to keep HLS alive
+                if (hlsPingInterval) clearInterval(hlsPingInterval);
+                hlsPingInterval = setInterval(() => {
+                    fetch(`/admin/channels/${currentHlsChannelId}/hls/ping`, { method: 'POST' }).catch(() => {});
+                }, 30000);
+
+            } catch (e) {
+                document.getElementById('hlsStatus').textContent = 'Error: ' + e.message;
+            }
+        }
+
+        function closeHlsPlayer() {
+            const video = document.getElementById('hlsVideo');
+            video.pause();
+            video.src = '';
+            if (hls) { hls.destroy(); hls = null; }
+            if (hlsPingInterval) { clearInterval(hlsPingInterval); hlsPingInterval = null; }
+            document.getElementById('hlsPlayerOverlay').classList.remove('active');
+            if (currentHlsChannelId) {
+                fetch(`/admin/channels/${currentHlsChannelId}/hls/stop`, { method: 'POST' }).catch(() => {});
+                currentHlsChannelId = null;
+            }
+        }
+
+        // Stop if user navigates away
+        window.addEventListener('beforeunload', () => {
+            if (currentHlsChannelId) {
+                // Synchronous beacon for reliable delivery on page unload
+                navigator.sendBeacon(`/admin/channels/${currentHlsChannelId}/hls/stop`);
+            }
+        });
     </script>
+
+    <!-- hls.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@1"></script>
+
+    <!-- HLS inline player overlay -->
+    <div id="hlsPlayerOverlay">
+        <div id="hlsPlayerBox">
+            <button id="hlsPlayerClose" onclick="closeHlsPlayer()">✕</button>
+            <div id="hlsPlayerTitle">Watch</div>
+            <video id="hlsVideo" controls playsinline></video>
+            <div id="hlsStatus"></div>
+        </div>
+    </div>
+
 </body>
 
 </html>

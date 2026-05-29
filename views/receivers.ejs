@@ -123,6 +123,8 @@
                     <th><%= t.receivers_th_location %></th>
                     <th><%= t.receivers_th_hostname %></th>
                     <th><%= t.receivers_th_ip %></th>
+                    <th><%= t.receivers_th_version %></th>
+                    <th><%= t.receivers_th_volume %></th>
                     <th><%= t.receivers_th_cpu %></th>
                     <th><%= t.receivers_th_temp %></th>
                     <th><%= t.receivers_th_traffic %></th>
@@ -152,10 +154,7 @@
                         </option>
                     <% }); %>
                 </select>
-            </div>
-            <div class="form-group">
-                <label><%= t.receivers_label_stream_url %></label>
-                <input type="text" id="streamUrl" class="form-control" placeholder="udp://239.0.0.1:1234">
+                <input type="text" id="streamUrl" class="form-control" style="margin-top:5px;" placeholder="udp://239.0.0.1:1234">
             </div>
             <button class="btn btn-primary" onclick="sendCommand()"><%= t.receivers_btn_send_command %></button>
             <hr>
@@ -163,9 +162,13 @@
                 <label><%= t.receivers_label_nickname %></label>
                 <input type="text" id="receiverNickname" class="form-control" placeholder="e.g. Hallway 1">
             </div>
-            <div class="form-group" style="margin-top: 20px;">
+            <div class="form-group">
                 <label><%= t.receivers_label_location %></label>
                 <input type="text" id="receiverLocation" class="form-control" placeholder="e.g. Building A, Floor 2">
+            </div>
+            <div class="form-group">
+                <label><%= t.receivers_label_volume %> <span id="volumeVal">30</span>%</label>
+                <input type="range" id="receiverVolume" class="form-control" min="0" max="100" step="1" oninput="document.getElementById('volumeVal').innerText = this.value">
             </div>
             <div style="display: flex; gap: 10px; margin-top: 10px;">
                 <button class="btn btn-primary" onclick="saveDetails()"><%= t.receivers_btn_save_details %></button>
@@ -205,15 +208,51 @@
                     const statusClass = isOnline ? 'status-online' : 'status-offline';
                     const statusText = isOnline ? '<%= t.receivers_status_online %>' : '<%= t.receivers_status_offline %>';
 
+                    // Find matched channel for planned bitrate
+                    let plannedBitrateMbit = null;
+                    if (r.actual_stream_url) {
+                        const ch = availableChannelsList.find(c => {
+                            const chUrl = `${c.protocol || 'udp'}://${c.multicast_ip}:${c.multicast_port}`;
+                            return chUrl === r.actual_stream_url;
+                        });
+                        if (ch && ch.ffmpeg_bitrate_k) {
+                            const hasTsduck = (ch.protocol === 'udp' && ch.name.toLowerCase() !== 'drones');
+                            const multiplier = hasTsduck ? 1.15 : 1.0;
+                            plannedBitrateMbit = (ch.ffmpeg_bitrate_k * multiplier) / 1000;
+                        }
+                    }
+
+                    const realBitrateMbit = r.traffic_speed ? (r.traffic_speed * 8 / 1000000) : null;
+                    
+                    let trafficHtml = '-';
+                    
+                    if (realBitrateMbit !== null) {
+                        const realStr = realBitrateMbit.toFixed(2);
+                        if (plannedBitrateMbit !== null) {
+                            const plannedStr = plannedBitrateMbit.toFixed(2);
+                            const diffPercent = Math.abs(realBitrateMbit - plannedBitrateMbit) / plannedBitrateMbit;
+                            
+                            if (diffPercent >= 0.15) {
+                                trafficHtml = `<span style="color: #d9534f; font-weight: bold; background-color: #fdf7f7; border: 1px solid #d9534f; padding: 2px 6px; border-radius: 4px;" title="Deviation: ${(diffPercent * 100).toFixed(1)}%">${plannedStr} / ${realStr} Mbit/s</span>`;
+                            } else {
+                                trafficHtml = `${plannedStr} / ${realStr} Mbit/s`;
+                            }
+                        } else {
+                            trafficHtml = `- / ${realStr} Mbit/s`;
+                        }
+                    }
+
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
                         <td><strong>${r.nickname || '-'}</strong></td>
                         <td>${r.location || '-'}</td>
                         <td style="font-size: 0.9em; color: #666;">${r.hostname || 'Unknown'}</td>
                         <td>${r.ip_address || '-'}</td>
+                        <td style="font-weight: 500; color: #007bff;">${r.version || '1.0.0'}</td>
+                        <td style="font-weight: bold; color: #28a745;">${r.actual_volume !== null ? r.actual_volume + '%' : '-'}</td>
                         <td>${r.cpu_usage ? r.cpu_usage.toFixed(1) + '%' : '-'}</td>
                         <td>${r.temperature ? r.temperature.toFixed(1) + '°C' : '-'}</td>
-                        <td>${r.traffic_speed ? (r.traffic_speed * 8 / 1000000).toFixed(2) + ' Mbit/s' : '-'}</td>
+                        <td>${trafficHtml}</td>
                         <td>${getChannelName(r.actual_stream_url)}</td>
                         <td>${r.current_source_ip || '-'}</td>
                         <td title="${lastSeen.toLocaleString()}">
@@ -275,6 +314,9 @@
 
             document.getElementById('receiverNickname').value = r ? (r.nickname || "") : "";
             document.getElementById('receiverLocation').value = r ? (r.location || "") : "";
+            const currentVol = r ? (r.target_volume !== null ? r.target_volume : 30) : 30;
+            document.getElementById('receiverVolume').value = currentVol;
+            document.getElementById('volumeVal').innerText = currentVol;
             
             document.getElementById('commandModal').style.display = 'block';
         }
@@ -317,11 +359,12 @@
         async function saveDetails() {
             const nick = document.getElementById('receiverNickname').value;
             const loc = document.getElementById('receiverLocation').value;
+            const vol = document.getElementById('receiverVolume').value;
             try {
                 const res = await fetch(`/api/receivers/${selectedReceiverId}/details`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ nickname: nick, location: loc })
+                    body: JSON.stringify({ nickname: nick, location: loc, volume: parseInt(vol) })
                 });
                 if (res.ok) {
                     alert('<%= t.receivers_js_details_saved %>');

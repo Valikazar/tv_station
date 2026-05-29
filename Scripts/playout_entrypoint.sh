@@ -60,11 +60,12 @@ MUXRATE_K=$(( FFMPEG_BITRATE_K * 115 / 100 ))
 mkdir -p /dev/shm/hls
 
 MUX_OPTS="-muxrate ${MUXRATE_K}k -pcr_period 20"
-OUTPUT_URL="udp://127.0.0.1:${UDP_PORT}?pkt_size=1316&flush_packets=1&buffer_size=10000000"
+OUTPUT_URL="udp://127.0.0.1:${UDP_PORT}?pkt_size=1316&flush_packets=1&buffer_size=10000000&bitrate=${MUXRATE_K}000"
 OUTPUT_FORMAT="mpegts"
 
+RE_FLAG="-re"
 if [ "$OUTPUT_PROTOCOL" = "rtp" ]; then
-    OUTPUT_URL="rtp://${MULTICAST_IP}:${MULTICAST_PORT}?localaddr=${INTERFACE_IP}&ttl=15"
+    OUTPUT_URL="rtp://${MULTICAST_IP}:${MULTICAST_PORT}?localaddr=${INTERFACE_IP}&ttl=15&buffer_size=10000000"
     OUTPUT_FORMAT="rtp_mpegts"
     MUX_OPTS=""
 fi
@@ -75,24 +76,16 @@ fi
     echo "[Master] Starting FFmpeg → $OUTPUT_URL (format=$OUTPUT_FORMAT)..."
     touch "/dev/shm/ch${CHANNEL_ID}_master.log"
     chmod 666 "/dev/shm/ch${CHANNEL_ID}_master.log"
-    ffmpeg -re -hide_banner -loglevel warning -stats \
-      -thread_queue_size 4096 \
-      -fflags +genpts+igndts+discardcorrupt \
+    # Single output: FIFO → UDP → TSDuck → multicast
+    # HLS is now on-demand via a separate tv_hls_ch_N container (started by the web server)
+    ffmpeg $RE_FLAG -hide_banner -loglevel warning -stats \
+      -fflags +igndts+discardcorrupt+genpts \
       -err_detect ignore_err \
-      -probesize 10000000 -analyzeduration 10000000 \
+      -probesize 2500000 -analyzeduration 2500000 \
       -f mpegts -i "$FIFO_PATH" \
       -map 0 -c copy \
       -f $OUTPUT_FORMAT $MUX_OPTS \
-      -max_muxing_queue_size 4096 \
-      "$OUTPUT_URL" \
-      -map 0 -c copy \
-      -f hls \
-      -hls_time 4 \
-      -hls_list_size 5 \
-      -hls_flags delete_segments+append_list \
-      -hls_segment_type mpegts \
-      -hls_segment_filename "/dev/shm/hls/ch${CHANNEL_ID}_%03d.ts" \
-      "/dev/shm/hls/ch${CHANNEL_ID}.m3u8" 2> "/dev/shm/ch${CHANNEL_ID}_master.log"
+      "$OUTPUT_URL" 2> "/dev/shm/ch${CHANNEL_ID}_master.log"
     RET=$?
     echo "[Master] FFmpeg exited with code $RET — restarting in 2s..."
     sleep 2

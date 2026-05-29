@@ -229,7 +229,7 @@ router.post('/upload-fallback', upload.single('fallbackFile'), async (req: Reque
 router.get('/receivers', async (req: Request, res: Response) => {
     try {
         const [channels] = await pool.execute<RowDataPacket[]>(
-            'SELECT id, name, multicast_ip, multicast_port, protocol FROM channels'
+            'SELECT id, name, multicast_ip, multicast_port, protocol, ffmpeg_bitrate_k FROM channels'
         );
         res.render('receivers', {
             username: req.session.username,

@@ -76,7 +76,7 @@ def generate_playlist(target_date_str=None):
     CHANNEL_FALLBACK_FILE = main_settings['fallback_path'] if main_settings and main_settings['fallback_path'] else FALLBACK_FILE
 
     # 2. Fetch Ad Videos for this specific channel
-    cursor.execute("SELECT id, filename, duration, target_slots_ids FROM ad_videos WHERE duration > 0 AND channel_id = %s", (CHANNEL_ID,))
+    cursor.execute("SELECT id, filename, duration, target_slots_ids, unmuted_slots_ids FROM ad_videos WHERE duration > 0 AND channel_id = %s", (CHANNEL_ID,))
     all_videos = cursor.fetchall()
     
     # Filter out videos whose files don't exist on disk
@@ -257,10 +257,20 @@ def generate_playlist(target_date_str=None):
                 'entry_type': 'filler',
                 'video_id': None,
                 'slot_id': slot_id_key if slot_id_key != 0 else None,
-                'channel_id': CHANNEL_ID
+                'channel_id': CHANNEL_ID,
+                'unmuted': 0
             })
             current_ms += assigned_duration_ms
         else:
+            is_unmuted = 0
+            try:
+                m_slots = candidate_video.get('unmuted_slots_ids', '[]')
+                if isinstance(m_slots, bytes): m_slots = m_slots.decode('utf-8')
+                if isinstance(m_slots, str): m_slots = json.loads(m_slots) if m_slots else []
+                if str(slot_id_key) in [str(x) for x in m_slots]:
+                    is_unmuted = 1
+            except: pass
+
             playlist_entries.append({
                 'schedule_date': target_date,
                 'start_time': datetime.combine(target_date, datetime.min.time()) + timedelta(milliseconds=current_ms),
@@ -269,17 +279,18 @@ def generate_playlist(target_date_str=None):
                 'entry_type': block_type,
                 'video_id': candidate_video['id'],
                 'slot_id': slot_id_key if slot_id_key != 0 else None,
-                'channel_id': CHANNEL_ID
+                'channel_id': CHANNEL_ID,
+                'unmuted': is_unmuted
             })
             current_ms += assigned_duration_ms
 
     if playlist_entries:
         CHUNK_SIZE = 500
         logging.info(f"Inserting {len(playlist_entries)} items in chunks...")
-        insert_query = "INSERT INTO generated_playlists (schedule_date, start_time, duration, filename, entry_type, video_id, slot_id, channel_id) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
+        insert_query = "INSERT INTO generated_playlists (schedule_date, start_time, duration, filename, entry_type, video_id, slot_id, channel_id, unmuted) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
         for i in range(0, len(playlist_entries), CHUNK_SIZE):
             chunk = playlist_entries[i:i + CHUNK_SIZE]
-            data = [(x['schedule_date'], x['start_time'], x['duration'], x['filename'], x['entry_type'], x['video_id'], x['slot_id'], x['channel_id']) for x in chunk]
+            data = [(x['schedule_date'], x['start_time'], x['duration'], x['filename'], x['entry_type'], x['video_id'], x['slot_id'], x['channel_id'], x['unmuted']) for x in chunk]
             cursor.executemany(insert_query, data)
             conn.commit()
     

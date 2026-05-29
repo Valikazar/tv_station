@@ -33,6 +33,22 @@ async function init() {
             )
         `);
         console.log('✅ time_slots table ready');
+
+        console.log('Running schema migrations for muting feature...');
+        try {
+            await pool.query(`ALTER TABLE ad_videos ADD COLUMN unmuted_slots_ids JSON DEFAULT ('[]')`);
+            console.log('✅ Added unmuted_slots_ids to ad_videos');
+        } catch (e: any) {
+            if (e.code !== 'ER_DUP_FIELDNAME') console.error('Migration error:', e.message);
+        }
+
+        try {
+            await pool.query(`ALTER TABLE generated_playlists ADD COLUMN unmuted TINYINT(1) DEFAULT 0`);
+            console.log('✅ Added unmuted to generated_playlists');
+        } catch (e: any) {
+             if (e.code !== 'ER_DUP_FIELDNAME') console.error('Migration error:', e.message);
+        }
+
         process.exit(0);
     } catch (err: any) {
         console.error('❌ Error initializing table:', err.message);

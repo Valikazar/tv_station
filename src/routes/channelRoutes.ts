@@ -1,8 +1,21 @@
 import express, { Request, Response } from 'express';
 import pool from '../config/db';
 import { RowDataPacket } from 'mysql2';
-import { createAndStartChannelContainers, stopChannelContainers, getHostNetworkInterfaces, stopBeaconIfNoChannelsActive } from '../services/dockerService';
+import { createAndStartChannelContainers, stopChannelContainers, getHostNetworkInterfaces, stopBeaconIfNoChannelsActive, startHlsWriter, stopHlsWriter, pauseHlsWriter, isHlsWriterRunning } from '../services/dockerService';
 import { initializeChannelDefaults } from '../utils/timeSlots';
+
+// In-process heartbeat timers: channelId → timeout handle
+const hlsTimers: Record<number, ReturnType<typeof setTimeout>> = {};
+const HLS_INACTIVITY_MS = 5 * 60 * 1000; // 5 minutes
+
+function resetHlsTimer(channelId: number) {
+    if (hlsTimers[channelId]) clearTimeout(hlsTimers[channelId]);
+    hlsTimers[channelId] = setTimeout(async () => {
+        console.log(`[HLS] Pausing channel ${channelId} due to inactivity (no ping for 5 min).`);
+        try { await pauseHlsWriter(channelId); } catch { /* ignore */ }
+        delete hlsTimers[channelId];
+    }, HLS_INACTIVITY_MS);
+}
 
 const router = express.Router();
 
@@ -126,6 +139,52 @@ router.delete('/:id', async (req: Request, res: Response) => {
         res.json({ success: true });
     } catch (e: any) {
         res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// ─── HLS on-demand endpoints ─────────────────────────────────────────────────
+
+// Start HLS writer for a channel, returns the m3u8 URL relative path
+router.post('/:id/hls/start', async (req: Request, res: Response) => {
+    const channelId = parseInt(req.params.id as string);
+    try {
+        const m3u8 = await startHlsWriter(channelId);
+        resetHlsTimer(channelId);
+        // m3u8 is an absolute path on the server; expose as web URL via existing /hls/ nginx alias
+        const url = `/hls/ch${channelId}.m3u8`;
+        res.json({ success: true, url });
+    } catch (e: any) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Heartbeat — call every 30s from the browser player to keep HLS alive
+router.post('/:id/hls/ping', (req: Request, res: Response) => {
+    const channelId = parseInt(req.params.id as string);
+    resetHlsTimer(channelId);
+    res.json({ success: true });
+});
+
+// Stop HLS writer explicitly (pauses the container, keeps it warm)
+router.post('/:id/hls/stop', async (req: Request, res: Response) => {
+    const channelId = parseInt(req.params.id as string);
+    if (hlsTimers[channelId]) { clearTimeout(hlsTimers[channelId]); delete hlsTimers[channelId]; }
+    try {
+        await pauseHlsWriter(channelId);
+        res.json({ success: true });
+    } catch (e: any) {
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// HLS status check
+router.get('/:id/hls/status', async (req: Request, res: Response) => {
+    const channelId = parseInt(req.params.id as string);
+    try {
+        const state = await isHlsWriterRunning(channelId);
+        res.json({ success: true, ...state });
+    } catch (e: any) {
+        res.json({ success: true, running: false, paused: false });
     }
 });
 

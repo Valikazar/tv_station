@@ -4,6 +4,7 @@ import { getSlots } from '../utils/timeSlots';
 import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
 import path from 'path';
+import pool from '../config/db';
 
 const router = express.Router();
 
@@ -14,6 +15,54 @@ router.get('/', (req: Request, res: Response) => {
     res.render('index', {
         slots: getSlots(channelId),
     });
+});
+
+router.get('/diagnostics', async (req: Request, res: Response) => {
+    try {
+        const [rows] = await pool.execute(`
+            SELECT 
+                p.video_id, 
+                IFNULL(a.display_name, gp.filename) as name,
+                DATE_FORMAT(gp.start_time, '%H:%i:%s') as sched_time,
+                DATE_FORMAT(p.start_time, '%H:%i:%s') as play_time,
+                TIMESTAMPDIFF(SECOND, gp.start_time, p.start_time) as diff_sec
+            FROM playback_log p
+            LEFT JOIN (
+                SELECT * FROM generated_playlists 
+                WHERE start_time >= DATE_SUB(NOW(), INTERVAL 14 HOUR)
+            ) gp ON p.video_id = gp.video_id 
+                 AND ABS(TIMESTAMPDIFF(MINUTE, p.start_time, gp.start_time)) < 180
+            LEFT JOIN ad_videos a ON p.video_id = a.id
+            WHERE p.start_time >= DATE_SUB(NOW(), INTERVAL 12 HOUR)
+            ORDER BY p.start_time DESC
+            LIMIT 100;
+        `);
+        // Format to HTML for easy reading
+        let html = '<table border="1" cellpadding="5" style="border-collapse: collapse; font-family: monospace;">';
+        html += '<tr><th>ID</th><th>Name</th><th>Scheduled time</th><th>Actual Played</th><th>Desync (seconds)</th></tr>';
+        
+        let badCount = 0;
+        (rows as any[]).forEach(r => {
+            const diff = r.diff_sec === null ? 'N/A' : r.diff_sec;
+            const color = Math.abs(r.diff_sec) > 60 ? 'color: red;' : '';
+            if (Math.abs(r.diff_sec) > 60) badCount++;
+            
+            html += `<tr style="${color}">
+                <td>${r.video_id || '-'}</td>
+                <td>${r.name || 'Unknown'}</td>
+                <td>${r.sched_time || '-'}</td>
+                <td>${r.play_time || '-'}</td>
+                <td>${diff}</td>
+            </tr>`;
+        });
+        html += '</table>';
+        html = `<h3>Schedule Desync Diagnostics (Last 100 plays)</h3>
+                <p>Found ${badCount} items with > 60s desync.</p>` + html;
+        
+        res.send(html);
+    } catch (err: any) {
+        res.status(500).send('Error: ' + err.message);
+    }
 });
 
 router.get('/report', async (req: Request, res: Response) => {

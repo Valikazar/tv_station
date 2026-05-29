@@ -8,6 +8,7 @@ import sys
 import threading
 import signal
 import random
+import json
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -81,7 +82,36 @@ CHANNEL_ID = int(os.environ.get('CHANNEL_ID', 1))
 
 MEDIA_DIR = os.environ.get('MEDIA_DIR', '/media/new_ads/')
 FIFO_PATH = f"/tmp/playout_fifo_ch{CHANNEL_ID}"
-SIGNAL_FILE = f"/tmp/schedule_updated_ch{CHANNEL_ID}"  # Hot-reload trigger
+SIGNAL_FILE = f"/tmp/schedule_updated_ch{CHANNEL_ID}"
+_PROBE_CACHE = {}
+
+def probe_file_info(filepath):
+    if filepath in _PROBE_CACHE:
+        return _PROBE_CACHE[filepath]
+    
+    duration = 0.0
+    has_audio = False
+    try:
+        cmd = [
+            'ffprobe', '-v', 'quiet', 
+            '-show_entries', 'format=duration:stream=codec_type',
+            '-of', 'json', filepath
+        ]
+        probe = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+        if probe.returncode == 0 and probe.stdout.strip():
+            data = json.loads(probe.stdout)
+            if 'format' in data and 'duration' in data['format']:
+                duration = float(data['format']['duration'])
+            if 'streams' in data:
+                for stream in data['streams']:
+                    if stream.get('codec_type') == 'audio':
+                        has_audio = True
+                        break
+    except Exception as e:
+        logging.error(f"Error probing {filepath}: {e}")
+        
+    _PROBE_CACHE[filepath] = (duration, has_audio)
+    return duration, has_audio
 
 class PlayoutSender:
     def __init__(self):
@@ -107,7 +137,7 @@ class PlayoutSender:
         # Initialize a single background queue and writer thread for continuous output
         import queue
         import threading
-        self.q = queue.Queue(maxsize=300) # 300 * 131072 = ~40MB buffer
+        self.q = queue.Queue(maxsize=400) # 400 * 20KB = ~8.0MB buffer (~12s @ 5Mbps)
         self._writer_thread = threading.Thread(target=self._fifo_writer_loop, daemon=True)
         self._writer_thread.start()
 
@@ -116,13 +146,13 @@ class PlayoutSender:
             item = self.q.get()
             if item is None:
                 continue
+            
             try:
                 if self.fifo_handle:
                     self.fifo_handle.write(item)
                     self.fifo_handle.flush()
             except Exception as e:
                 self.writer_error = e
-                # Drop remaining queue items to avoid backlog after crash
                 try:
                     while not self.q.empty():
                         self.q.get_nowait()
@@ -183,7 +213,7 @@ class PlayoutSender:
         
         # Find what SHOULD be playing right now, excluding the one we just finished
         if self.last_played_id:
-            query_current = """SELECT gp.id, gp.video_id, gp.start_time, gp.duration, gp.filename, gp.entry_type, IFNULL(ts.exclude_from_stats, 0) as exclude_from_stats
+            query_current = """SELECT gp.id, gp.video_id, gp.start_time, gp.duration, gp.filename, gp.entry_type, gp.unmuted, IFNULL(ts.exclude_from_stats, 0) as exclude_from_stats
                 FROM generated_playlists gp
                 LEFT JOIN time_slots ts ON gp.slot_id = ts.id
                 WHERE gp.start_time <= %s AND DATE_ADD(gp.start_time, INTERVAL gp.duration/1000 SECOND) > %s 
@@ -191,7 +221,7 @@ class PlayoutSender:
                 ORDER BY gp.start_time DESC LIMIT 1"""
             cursor.execute(query_current, (current_time, current_time, self.last_played_id, CHANNEL_ID))
         else:
-            query_current = """SELECT gp.id, gp.video_id, gp.start_time, gp.duration, gp.filename, gp.entry_type, IFNULL(ts.exclude_from_stats, 0) as exclude_from_stats
+            query_current = """SELECT gp.id, gp.video_id, gp.start_time, gp.duration, gp.filename, gp.entry_type, gp.unmuted, IFNULL(ts.exclude_from_stats, 0) as exclude_from_stats
                 FROM generated_playlists gp
                 LEFT JOIN time_slots ts ON gp.slot_id = ts.id
                 WHERE gp.start_time <= %s AND DATE_ADD(gp.start_time, INTERVAL gp.duration/1000 SECOND) > %s 
@@ -206,7 +236,7 @@ class PlayoutSender:
             return current, "current"
         
         # Nothing playing right now — find the next scheduled item
-        query_next = """SELECT gp.id, gp.video_id, gp.start_time, gp.duration, gp.filename, gp.entry_type, IFNULL(ts.exclude_from_stats, 0) as exclude_from_stats
+        query_next = """SELECT gp.id, gp.video_id, gp.start_time, gp.duration, gp.filename, gp.entry_type, gp.unmuted, IFNULL(ts.exclude_from_stats, 0) as exclude_from_stats
             FROM generated_playlists gp
             LEFT JOIN time_slots ts ON gp.slot_id = ts.id
             WHERE gp.start_time > %s AND gp.channel_id = %s ORDER BY gp.start_time ASC LIMIT 1"""
@@ -232,10 +262,12 @@ class PlayoutSender:
         except Exception as e:
             logging.error(f"Error fetching channel fallback path: {e}")
 
-        # Try to find absolute path first (if it's already absolute or in standard fallback dir)
         paths_to_try = [
+            os.path.join("/media/fallback", fallback_file),
             os.path.join("/media/ads/fallback", fallback_file),
             os.path.join(MEDIA_DIR, "fallback", fallback_file),
+            os.path.join(MEDIA_DIR, fallback_file),
+            os.path.join("/media", fallback_file),
             os.path.join("/app/media/fallback", fallback_file),
             fallback_file # maybe it's absolute already
         ]
@@ -289,7 +321,7 @@ class PlayoutSender:
         thread = threading.Thread(target=_regen, daemon=True)
         thread.start()
 
-    def stream_file(self, filename, seek_seconds=0.0, duration_limit=None, video_id=None, exclude_from_stats=False, is_filler=False):
+    def stream_file(self, filename, seek_seconds=0.0, duration_limit=None, video_id=None, exclude_from_stats=False, is_filler=False, is_unmuted=False):
         # Resolve path: handle both absolute (filler) and relative (ads)
         if os.path.isabs(filename):
             filepath = filename
@@ -300,50 +332,25 @@ class PlayoutSender:
             logging.warning(f"FILE MISSING: {filepath} — will regenerate playlist")
             return 'missing'
 
-        # Probe for exact actual duration to prevent PTS drift
-        actual_duration = 0.0
-        try:
-            probe = subprocess.run(
-                ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration',
-                 '-of', 'default=noprint_wrappers=1:nokey=1', filepath],
-                capture_output=True, text=True, timeout=5
-            )
-            file_dur = float(probe.stdout.strip())
-            
-            if seek_seconds > 0 and duration_limit is None:
-                if seek_seconds >= file_dur - 1.0:
-                    logging.info(f"Skipping {filename}: seek {seek_seconds:.1f}s >= duration {file_dur:.1f}s")
-                    return True  # Treat as success so we move on
-
-            actual_duration = file_dur
-            if seek_seconds > 0:
-                actual_duration -= seek_seconds
-            if duration_limit and actual_duration > duration_limit:
-                actual_duration = duration_limit
-            if actual_duration < 0.0:
-                actual_duration = 0.0
-        except Exception:
-            actual_duration = 0.0  # Fallback to elapsed wall-clock if probe fails
+        # Probe for duration and audio using single cached probe
+        file_dur, has_audio = probe_file_info(filepath)
+        
+        actual_duration = file_dur
+        if seek_seconds > 0:
+            if seek_seconds >= file_dur - 1.0:
+                logging.info(f"Skipping {filename}: seek {seek_seconds:.1f}s >= duration {file_dur:.1f}s")
+                return True
+            actual_duration -= seek_seconds
+        if duration_limit and actual_duration > duration_limit:
+            actual_duration = duration_limit
+        if actual_duration < 0.0:
+            actual_duration = 0.0
 
         vf = "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=25,format=yuv420p"
-        
-        # Probe for audio stream to decide if we need silent audio injection
-        has_audio = False
-        try:
-            probe = subprocess.run(
-                ['ffprobe', '-v', 'quiet', '-select_streams', 'a',
-                 '-show_entries', 'stream=codec_type',
-                 '-of', 'default=noprint_wrappers=1:nokey=1', filepath],
-                capture_output=True, text=True, timeout=5
-            )
-            has_audio = 'audio' in probe.stdout
-        except Exception:
-            has_audio = True  # Assume audio exists if probe fails
-
         bitrate_k = int(os.environ.get('FFMPEG_BITRATE_K', 5000))
 
-        # Timing Swap: Remove '-re' from feeder. The Master FFmpeg now controls the clock.
-        # This allows the feeder to encode ahead and fill the buffer.
+        # We remove '-re' from feeder because the Master FFmpeg uses '-re' on FIFO input.
+        # This keeps our RAM queue and FIFO full, completely eliminating transitions freeze.
         cmd = [
             'ffmpeg', '-ss', f"{seek_seconds:.3f}",
             '-fflags', '+igndts+discardcorrupt',
@@ -351,27 +358,37 @@ class PlayoutSender:
             '-i', filepath
         ]
 
-        if duration_limit:
-            cmd.insert(1, '-t')
-            cmd.insert(2, f"{duration_limit:.3f}")
-
-        if not has_audio:
+        if not has_audio or not is_unmuted:
             # Add silent stereo audio source matching our target format
             cmd += ['-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000']
-            cmd += ['-map', '0:v:0', '-map', '1:a:0', '-shortest']
+            cmd += ['-map', '0:v:0', '-map', '1:a:0']
         else:
             cmd += ['-map', '0:v:0', '-map', '0:a:0']
 
+        v_bitrate = int(bitrate_k * 0.94)  # Give headroom for TS muxing overhead and audio
+        
+        # FIX A/V DESYNC: 
+        # 1. Normalize PTS to 0
+        # 2. Pad both streams so neither ends prematurely and causes a gap
+        # 3. Use -t exactly at output to ensure exact duration without drift
+        vf_sync = "setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=10"
+        af_sync = "asetpts=PTS-STARTPTS,aresample=48000:async=1,apad=pad_dur=10"
+
         cmd += [
-            '-filter:v', vf,
-            '-c:v', 'libx264', '-preset', 'ultrafast', '-b:v', f'{bitrate_k}k',
-            '-maxrate', f'{bitrate_k}k', '-bufsize', f'{bitrate_k * 2}k',
-            '-g', '50', '-r', '25', '-profile:v', 'main', '-level', '4.0',
+            '-filter:v', f"{vf},{vf_sync}",
+            '-c:v', 'libx264', '-preset', 'ultrafast', '-b:v', f'{v_bitrate}k',
+            '-maxrate', f'{v_bitrate}k', '-bufsize', f'{bitrate_k * 2}k',
+            '-bf', '0', '-vsync', 'cfr', 
+            '-g', '50', '-keyint_min', '50', '-sc_threshold', '0', 
+            '-r', '25', '-profile:v', 'high', '-level', '4.1',
             '-c:a', 'aac', '-b:a', '192k', '-ac', '2', '-ar', '48000',
-            '-af', 'aresample=48000:async=1',
+            '-af', af_sync,
+            '-max_interleave_delta', '0',
+            '-max_delay', '500000',
             '-flags', '+global_header',
             '-metadata', f'title=feeder_ch{CHANNEL_ID}',
             '-output_ts_offset', f"{self.ts_offset:.3f}",
+            '-t', f"{actual_duration:.3f}",
             '-f', 'mpegts',
             'pipe:1'
         ]
@@ -405,7 +422,7 @@ class PlayoutSender:
                 if self.writer_error:
                     raise self.writer_error
 
-                chunk = self.process.stdout.read(262144) # 256KB buffer for smoother FIFO write
+                chunk = self.process.stdout.read(20480) # 20KB buffer: perfect balanced middle ground
                 if not chunk:
                     break
                 self.q.put(chunk)
@@ -436,14 +453,19 @@ class PlayoutSender:
             return True
         except Exception as e:
             self._master_crashed = True
-            self.ts_offset = 0.0
-            self.stream_start_time = datetime.now()
+            # CRITICAL FIX: do NOT reset ts_offset to 0.0
+            # The master was consuming at ~1x real-time speed, so advance ts_offset
+            # by wall_elapsed to keep PTS continuity for the restarted master.
+            wall_elapsed_at_crash = time.monotonic() - stream_start
+            self.ts_offset += wall_elapsed_at_crash
+            # Realign stream_start_time so virtual clock equals wall clock now
+            self.stream_start_time = datetime.now() - timedelta(seconds=self.ts_offset)
             self.clear_queue()
             
             if 'Broken pipe' in str(e) or 'Errno 32' in str(e) or isinstance(e, BrokenPipeError):
-                logging.error(f"Broken pipe detected — master FFmpeg likely died. Resetting stream.")
+                logging.error(f"Broken pipe detected — master FFmpeg likely died. Advancing ts_offset by {wall_elapsed_at_crash:.1f}s (new offset={self.ts_offset:.1f}s).")
             else:
-                logging.error(f"Feeder error: {e}")
+                logging.error(f"Feeder error: {e} — advancing ts_offset by {wall_elapsed_at_crash:.1f}s.")
             
             time.sleep(2)
             try:
@@ -451,7 +473,7 @@ class PlayoutSender:
             except:
                 pass
             self.fifo_handle = open(FIFO_PATH, 'wb')
-            logging.info("FIFO re-opened, ts_offset and stream_start_time reset.")
+            logging.info(f"FIFO re-opened, ts_offset adjusted to {self.ts_offset:.1f}s (no reset).")
             return False
         finally:
             wall_elapsed = time.monotonic() - stream_start
@@ -503,7 +525,16 @@ class PlayoutSender:
             # Timing Swap: calculate current stream position relative to start + offset
             # This allows the feeder to be ahead of wall-clock time
             current_stream_time = self.stream_start_time + timedelta(seconds=self.ts_offset)
-            
+
+            # Safety resync: if virtual clock is > 5 minutes behind wall time (e.g. after a
+            # stuck-loop on missing files), auto-advance to prevent infinite spinning on past items.
+            clock_lag = (datetime.now() - current_stream_time).total_seconds()
+            if clock_lag > 300:
+                logging.warning(f"[SafetyResync] Virtual clock is {clock_lag:.0f}s behind wall time — auto-advancing.")
+                self.ts_offset += clock_lag
+                self.stream_start_time = datetime.now() - timedelta(seconds=self.ts_offset)
+                continue
+
             item, status = self.get_next_item(current_time=current_stream_time)
             
             if status == "current":
@@ -513,30 +544,43 @@ class PlayoutSender:
                 if remaining < 0.5:
                     self.last_played_id = item['id']
                     continue
-                result = self.stream_file(item['filename'], seek_seconds=seek, duration_limit=remaining, video_id=item['video_id'], exclude_from_stats=item.get('exclude_from_stats', False))
+                is_unmuted = bool(item.get('unmuted', 0))
+                result = self.stream_file(item['filename'], seek_seconds=seek, duration_limit=remaining, video_id=item['video_id'], exclude_from_stats=item.get('exclude_from_stats', False), is_unmuted=is_unmuted)
                 self.last_played_id = item['id']
                 if result == 'missing':
+                    # Advance past the missing slot so we don't loop on it forever.
+                    skip_s = max(remaining, 1.0)
+                    logging.warning(f"[Missing] Skipping current item '{item['filename']}', advancing virtual clock by {skip_s:.1f}s.")
+                    self.ts_offset += skip_s
+                    time.sleep(0.5)
                     self.regenerate_playlist()
             elif status == "next":
                 if item:
                     wait = (item['start_time'] - current_stream_time).total_seconds()
-                    if wait > 1.0: 
+                    if wait > 0.1:
                         filler = self.get_filler()
-                        if filler: self.stream_file(filler['filename'], duration_limit=wait, video_id=filler['id'], exclude_from_stats=False, is_filler=True)
-                        else: 
-                            # If no filler, we physically have to wait because we can't push "silence" without a file
-                            time.sleep(min(wait, 2))
+                        if filler:
+                            # Play filler for exactly 'wait' seconds to bridge the gap and stay on schedule
+                            logging.info(f"[Scheduler] Bridging a gap of {wait:.2f}s with filler: {filler['filename']}")
+                            self.stream_file(filler['filename'], duration_limit=wait, video_id=filler['id'], is_filler=True)
+                        else:
+                            # No filler: jump virtual clock and sleep
+                            logging.warning(f"[Scheduler] No filler found to bridge gap of {wait:.2f}s. Sleeping.")
+                            sleep_time = min(wait, 2.0)
+                            time.sleep(sleep_time)
+                            self.ts_offset += sleep_time
                     else:
-                        result = self.stream_file(item['filename'], duration_limit=item['duration'] / 1000.0, video_id=item['video_id'], exclude_from_stats=item.get('exclude_from_stats', False))
-                        self.last_played_id = item['id']
-                        if result == 'missing':
-                            self.regenerate_playlist()
+                        # Gap is negligible, advance virtual clock to reach start time in next iteration
+                        self.ts_offset += wait
+                        time.sleep(max(wait, 0.01))
                 else:
                     filler = self.get_filler()
-                    if filler: self.stream_file(filler['filename'], video_id=filler['id'], is_filler=True)
-                    else: time.sleep(2)
+                    if filler:
+                        self.stream_file(filler['filename'], video_id=filler['id'], is_filler=True)
+                    else:
+                        time.sleep(2)
             else:
-                 time.sleep(2)
+                time.sleep(2)
 
 if __name__ == "__main__":
     import signal

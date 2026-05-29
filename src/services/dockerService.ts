@@ -113,7 +113,6 @@ export async function createAndStartChannelContainers(channelId: number) {
                 "-P", "pcrbitrate", "--min-pcr", "4", "--min-pid", "1",
                 "-P", "continuity", "--fix",
                 "-P", "sdt", "--service-id", "0x0001", "--provider", `SRV:http://${interfaceIp}:3000`,
-                "-P", "regulate", "--bitrate", tsduckBitrate.toString(),
                 "-O", "ip", "--local-address", interfaceIp, "--packet-burst", "7", "--enforce-burst", "--ttl", "10",
                 `${mcastIp}:${mcastPort}`
             ],
@@ -139,6 +138,111 @@ export async function createAndStartChannelContainers(channelId: number) {
 export async function stopChannelContainers(channelId: number) {
     await removeContainer(`tv_playout_ch_${channelId}`);
     await removeContainer(`tv_tsduck_ch_${channelId}`);
+    await removeContainer(`tv_hls_ch_${channelId}`); // also stop any HLS writer
+}
+
+/** Starts (or resumes) an on-demand HLS writer container for the given channel.
+ *  State machine:
+ *    paused   → unpause (fast, no container recreation)
+ *    running  → already live, return immediately
+ *    missing  → create fresh container and start it
+ *  Reads from TSDuck multicast output (UDP) or RTP output (RTP channels).
+ */
+export async function startHlsWriter(channelId: number): Promise<string> {
+    const containerName = `tv_hls_ch_${channelId}`;
+    const hlsDir = `/dev/shm/hls`;
+    const m3u8Path = `${hlsDir}/ch${channelId}.m3u8`;
+
+    // Check existing container state
+    try {
+        const info = await makeDockerRequest('GET', `/containers/${containerName}/json`);
+        if (info?.State?.Paused) {
+            // Fast path: unpause existing container
+            await makeDockerRequest('POST', `/containers/${containerName}/unpause`);
+            console.log(`[HLS] Unpaused writer for channel ${channelId}`);
+            return m3u8Path;
+        }
+        if (info?.State?.Running) {
+            console.log(`[HLS] Writer already running for channel ${channelId}`);
+            return m3u8Path;
+        }
+        // Stopped/exited — remove and recreate
+        await removeContainer(containerName);
+    } catch {
+        // Container does not exist — create fresh
+    }
+
+    const [rows] = await pool.execute<RowDataPacket[]>(
+        'SELECT multicast_ip, multicast_port, interface_ip, protocol FROM channels WHERE id = ?',
+        [channelId]
+    );
+    if (rows.length === 0) throw new Error('Channel not found');
+
+    const { multicast_ip, multicast_port, interface_ip, protocol } = rows[0];
+    const segPattern = `${hlsDir}/ch${channelId}_%03d.ts`;
+
+    let inputUrl: string;
+    if (protocol === 'rtp') {
+        inputUrl = `rtp://${multicast_ip}:${multicast_port}?localaddr=${interface_ip}`;
+    } else {
+        inputUrl = `udp://@${multicast_ip}:${multicast_port}?localaddr=${interface_ip}&fifo_size=5000000&overrun_nonfatal=1`;
+    }
+
+    // Fresh container: clean stale segments first, then start ffmpeg
+    await makeDockerRequest('POST', `/containers/create?name=${containerName}`, {
+        Image: 'tv_station-tsduck_ch2',
+        Entrypoint: ['sh', '-c'],
+        Cmd: [
+            // Purge stale segments from previous run before starting ffmpeg
+            `rm -f /dev/shm/hls/ch${channelId}_*.ts /dev/shm/hls/ch${channelId}.m3u8 2>/dev/null; ` +
+            `mkdir -p /dev/shm/hls && ` +
+            `ffmpeg -re -i '${inputUrl}' -c copy -f hls ` +
+            `-hls_time 4 -hls_list_size 5 ` +
+            `-hls_flags delete_segments+append_list ` +
+            `-hls_segment_type mpegts ` +
+            `-hls_segment_filename '${segPattern}' '${m3u8Path}'`
+        ],
+        HostConfig: {
+            NetworkMode: 'host',
+            Binds: ['/dev/shm:/dev/shm'],
+            RestartPolicy: { Name: 'no' }
+        }
+    });
+    await makeDockerRequest('POST', `/containers/${containerName}/start`);
+    console.log(`[HLS] Fresh writer started for channel ${channelId} → ${m3u8Path} (stale segments purged)`)
+    return m3u8Path;
+}
+
+/** Pauses the HLS writer container (keeps it warm for fast resume). */
+export async function pauseHlsWriter(channelId: number) {
+    const containerName = `tv_hls_ch_${channelId}`;
+    try {
+        const info = await makeDockerRequest('GET', `/containers/${containerName}/json`);
+        if (info?.State?.Running && !info?.State?.Paused) {
+            await makeDockerRequest('POST', `/containers/${containerName}/pause`);
+            console.log(`[HLS] Writer paused for channel ${channelId}`);
+        }
+    } catch {
+        // Container gone — nothing to pause
+    }
+}
+
+/** Hard-stops and removes the HLS writer (used when channel is stopped). */
+export async function stopHlsWriter(channelId: number) {
+    await removeContainer(`tv_hls_ch_${channelId}`);
+    console.log(`[HLS] Writer removed for channel ${channelId}`);
+}
+
+export async function isHlsWriterRunning(channelId: number): Promise<{ running: boolean; paused: boolean }> {
+    try {
+        const data = await makeDockerRequest('GET', `/containers/tv_hls_ch_${channelId}/json`);
+        return {
+            running: data?.State?.Running === true && data?.State?.Paused !== true,
+            paused:  data?.State?.Paused  === true
+        };
+    } catch {
+        return { running: false, paused: false };
+    }
 }
 
 /** Starts a lightweight beacon stream on udp://226.0.0.1:5004 on the given interface.
@@ -154,23 +258,25 @@ export async function startBeaconStream(interfaceIp: string) {
 
     const serverUrl = `SRV:http://${interfaceIp}:3000`;
     const beaconConfig = {
-        Image: "tv_station-tsduck_ch2",
+        Image: "tv_station-tv_playout",
+        Entrypoint: ["ffmpeg"],
         Cmd: [
-            "-v",
-            "-I", "null",
-            "-P", "pat", "--create", "--add-service", "0x0001/0x100",
-            "-P", "pmt", "--create", "--service", "0x0001",
-            "-P", "sdt", "--create", "--service", "0x0001", "--provider", serverUrl, "--name", "TV-Beacon",
-            "-P", "regulate", "--bitrate", "100000",
-            "-O", "ip", "--local-address", interfaceIp, "--ttl", "10",
-            "226.0.0.1:5004"
+            "-re",
+            "-f", "lavfi",
+            "-i", "anullsrc=sample_rate=8000:channel_layout=mono",
+            "-c:a", "aac",
+            "-b:a", "16k",
+            "-metadata", "service_name=TV-Beacon",
+            "-metadata", `service_provider=${serverUrl}`,
+            "-f", "mpegts",
+            `udp://226.0.0.1:5004?pkt_size=1316&localaddr=${interfaceIp}`
         ],
         HostConfig: {
             NetworkMode: "host",
             RestartPolicy: { Name: "always" }
         },
         HealthCheck: {
-            Test: ["CMD-SHELL", "pgrep tsp || exit 1"],
+            Test: ["CMD-SHELL", "pgrep ffmpeg || exit 1"],
             Interval: 10000000000, // 10s
             Timeout: 5000000000,  // 5s
             Retries: 3

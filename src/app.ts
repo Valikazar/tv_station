@@ -60,6 +60,26 @@ app.set('view engine', 'ejs');
 // Static files
 app.use(express.static(path.join(__dirname, '../public')));
 
+// HLS on-demand segments: served from /dev/shm/hls (written by tv_hls_ch_N containers)
+// /dev/shm is mounted :ro in the tv_site container via docker-compose
+app.use('/hls', (req: Request, res: Response, next: NextFunction) => {
+    // Only allow .m3u8 and .ts files
+    if (!req.path.match(/\.(m3u8|ts)$/)) {
+        return res.status(403).json({ error: 'Forbidden' });
+    }
+    res.setHeader('Cache-Control', 'no-cache, no-store');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    next();
+}, express.static('/dev/shm/hls', {
+    setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.m3u8')) {
+            res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+        } else if (filePath.endsWith('.ts')) {
+            res.setHeader('Content-Type', 'video/mp2t');
+        }
+    }
+}));
+
 // Authentication middleware
 const requireAuth = (req: Request, res: Response, next: NextFunction) => {
     if (req.session.isAuthenticated) {

@@ -1,8 +1,31 @@
 import express, { Request, Response } from 'express';
 import pool from '../config/db';
 import { RowDataPacket } from 'mysql2';
+import fs from 'fs';
+import path from 'path';
 
 const router = express.Router();
+let isSchemaPatched = false;
+
+async function patchSchema() {
+    if (isSchemaPatched) return;
+    try {
+        const [columns]: any = await pool.query("SHOW COLUMNS FROM receivers LIKE 'version'");
+        if (columns.length === 0) {
+            console.log("Patching 'receivers' table: Adding 'version' column...");
+            await pool.query("ALTER TABLE receivers ADD COLUMN version VARCHAR(20) DEFAULT '1.0.0' AFTER ip_address");
+        }
+        
+        const [volColumns]: any = await pool.query("SHOW COLUMNS FROM receivers LIKE 'target_volume'");
+        if (volColumns.length === 0) {
+            console.log("Patching 'receivers' table: Adding volume columns...");
+            await pool.query("ALTER TABLE receivers ADD COLUMN target_volume INT DEFAULT 30 AFTER version, ADD COLUMN actual_volume INT AFTER target_volume");
+        }
+        isSchemaPatched = true;
+    } catch (e) {
+        console.warn("Schema patch check failed (can be ignored if already patched):", e);
+    }
+}
 
 // Public: called by RPi agent on startup to get its stream URL
 router.get('/config', async (req: Request, res: Response) => {
@@ -62,7 +85,9 @@ router.post('/report', async (req: Request, res: Response) => {
             temperature,
             traffic_speed,
             current_source_ip,
-            current_stream_url
+            current_stream_url,
+            version,
+            actual_volume
         } = req.body;
 
         if (!id) {
@@ -72,29 +97,33 @@ router.post('/report', async (req: Request, res: Response) => {
         // NOTE: current_stream_url is intentionally NOT updated here.
         // It stores the last *assigned* (commanded) URL, set only via /command endpoint.
         // actual_stream_url stores what MPV is actually playing (reported by agent).
+        await patchSchema();
+
         await pool.execute(`
             INSERT INTO receivers (
-                id, hostname, ip_address, cpu_usage, temperature, 
-                traffic_speed, current_source_ip, actual_stream_url, last_seen
+                id, hostname, ip_address, version, cpu_usage, temperature, 
+                traffic_speed, current_source_ip, actual_stream_url, actual_volume, last_seen
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON DUPLICATE KEY UPDATE
                 hostname = VALUES(hostname),
                 ip_address = VALUES(ip_address),
+                version = VALUES(version),
                 cpu_usage = VALUES(cpu_usage),
                 temperature = VALUES(temperature),
                 traffic_speed = VALUES(traffic_speed),
                 current_source_ip = VALUES(current_source_ip),
                 actual_stream_url = VALUES(actual_stream_url),
+                actual_volume = VALUES(actual_volume),
                 last_seen = CURRENT_TIMESTAMP
         `, [
-            id, hostname, ip_address, cpu_usage, temperature,
-            traffic_speed, current_source_ip, current_stream_url
+            id, hostname, ip_address, version || '1.0.0', cpu_usage, temperature,
+            traffic_speed, current_source_ip, current_stream_url, actual_volume || null
         ]);
 
-        // Check if there are pending commands
+        // Check if there are pending commands or settings sync
         const [rows]: any = await pool.execute(
-            'SELECT target_stream_url, target_command FROM receivers WHERE id = ?',
+            'SELECT target_stream_url, target_command, target_volume FROM receivers WHERE id = ?',
             [id]
         );
 
@@ -120,6 +149,11 @@ router.post('/report', async (req: Request, res: Response) => {
                 clearNeeded = true;
             }
 
+            // Sync volume if mismatch
+            if (rows[0].target_volume !== null && rows[0].target_volume !== actual_volume) {
+                response.volume = rows[0].target_volume;
+            }
+
             if (clearNeeded) {
                 // Clear the commands after sending
                 await pool.execute(
@@ -136,6 +170,36 @@ router.post('/report', async (req: Request, res: Response) => {
     }
 });
 
+// Endpoint to receive logs from agents when they encounter a crash or freeze
+router.post('/logs', async (req: Request, res: Response) => {
+    try {
+        const { id, hostname, logs } = req.body;
+        if (!id || !logs) {
+            return res.status(400).json({ error: 'id and logs are required' });
+        }
+
+        const logsDir = path.join(__dirname, '../../logs');
+        if (!fs.existsSync(logsDir)) {
+            fs.mkdirSync(logsDir, { recursive: true });
+        }
+
+        const logFilePath = path.join(logsDir, `receiver_${id}.log`);
+        const timestamp = new Date().toISOString();
+        
+        let logContent = `\n--- LOG REPORT AT ${timestamp} (Hostname: ${hostname || 'Unknown'}) ---\n`;
+        logContent += logs;
+        logContent += `\n-----------------------------------------------------\n`;
+
+        fs.appendFileSync(logFilePath, logContent);
+        
+        console.log(`[Receivers] Saved crash logs from receiver ${id}`);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Error saving receiver logs:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // Admin routes for receivers (will be protected by requireAuth in app.ts)
 router.get('/', async (req: Request, res: Response) => {
     try {
@@ -143,7 +207,7 @@ router.get('/', async (req: Request, res: Response) => {
             SELECT *, 
             (TIMESTAMPDIFF(SECOND, last_seen, CURRENT_TIMESTAMP) < 60) AS is_online 
             FROM receivers 
-            ORDER BY last_seen DESC
+            ORDER BY INET_ATON(ip_address) ASC, last_seen DESC
         `);
         res.json(rows);
     } catch (err) {
@@ -189,10 +253,10 @@ router.delete('/:id', async (req: Request, res: Response) => {
 router.post('/:id/details', async (req: Request, res: Response) => {
     try {
         const { id } = req.params;
-        const { nickname, location } = req.body;
+        const { nickname, location, volume } = req.body;
         await pool.execute(
-            'UPDATE receivers SET nickname = ?, location = ? WHERE id = ?',
-            [nickname || null, location || null, id]
+            'UPDATE receivers SET nickname = ?, location = ?, target_volume = ? WHERE id = ?',
+            [nickname || null, location || null, volume !== undefined ? volume : 30, id]
         );
         res.json({ success: true, message: 'Details updated' });
     } catch (err) {

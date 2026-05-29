@@ -10,6 +10,10 @@ import { RowDataPacket } from 'mysql2';
 import { logAction } from '../utils/actionLogger';
 import { execInContainer } from '../services/dockerService';
 
+// Schema auto-patching from within Docker context to bypass host connectivity issues
+pool.query(`ALTER TABLE ad_videos ADD COLUMN unmuted_slots_ids JSON DEFAULT ('[]')`).catch(() => {});
+pool.query(`ALTER TABLE generated_playlists ADD COLUMN unmuted TINYINT(1) DEFAULT 0`).catch(() => {});
+
 const execAsync = promisify(exec);
 const router = express.Router();
 const FALLBACK_SOURCE = '/opt/tv_station/media/ads/fallback/fall.mp4';
@@ -75,16 +79,24 @@ router.get('/', async (req: Request, res: Response) => {
         }
 
         // Filter videos based on showArchived
-        const filteredVideos = rows.filter(video => {
+        const filteredVideos = rows.map(video => {
             let slots: (number | string)[] = [];
+            let unmutedSlots: (number | string)[] = [];
             try {
-                if (typeof video.target_slots_ids === 'string') {
-                    slots = JSON.parse(video.target_slots_ids || '[]');
-                } else if (Array.isArray(video.target_slots_ids)) {
-                    slots = video.target_slots_ids;
-                }
+                if (typeof video.target_slots_ids === 'string') slots = JSON.parse(video.target_slots_ids || '[]');
+                else if (Array.isArray(video.target_slots_ids)) slots = video.target_slots_ids;
             } catch (e) { slots = []; }
 
+            try {
+                if (typeof video.unmuted_slots_ids === 'string') unmutedSlots = JSON.parse(video.unmuted_slots_ids || '[]');
+                else if (Array.isArray(video.unmuted_slots_ids)) unmutedSlots = video.unmuted_slots_ids;
+            } catch (e) { unmutedSlots = []; }
+
+            video.parsedSlots = slots;
+            video.parsedUnmutedSlots = unmutedSlots;
+            return video;
+        }).filter(video => {
+            const slots = video.parsedSlots;
             if (slots.length === 0) return false;
             if (showArchived) return true;
 
@@ -281,6 +293,44 @@ router.post('/remove-from-slot', async (req: Request, res: Response) => {
         res.status(500).json({ success: false, error: err.message });
     }
 });
+
+// Toggle unmuted state for a slot
+router.post('/toggle-mute', async (req: Request, res: Response) => {
+    try {
+        const { videoId, slotId } = req.body;
+        const [rows] = await pool.execute<RowDataPacket[]>('SELECT unmuted_slots_ids FROM ad_videos WHERE id = ?', [videoId]);
+        if (rows.length === 0) return res.status(404).send('Video not found');
+
+        const video = rows[0];
+        let unmutedSlots = [];
+        try {
+            if (typeof video.unmuted_slots_ids === 'string') unmutedSlots = JSON.parse(video.unmuted_slots_ids || '[]');
+            else if (Array.isArray(video.unmuted_slots_ids)) unmutedSlots = video.unmuted_slots_ids;
+            else if (video.unmuted_slots_ids) unmutedSlots = [video.unmuted_slots_ids];
+        } catch (e) { }
+
+        const targetDbId = isNaN(Number(slotId)) ? slotId : Number(slotId);
+        const index = unmutedSlots.indexOf(targetDbId);
+
+        let isUnmutedNow = false;
+        if (index === -1) {
+            unmutedSlots.push(targetDbId);
+            isUnmutedNow = true;
+        } else {
+            unmutedSlots.splice(index, 1);
+        }
+
+        await pool.execute('UPDATE ad_videos SET unmuted_slots_ids = ? WHERE id = ?', [JSON.stringify(unmutedSlots), videoId]);
+
+        const username = req.session?.username || 'unknown';
+        logAction(username, 'TOGGLE_MUTE', `video ID ${videoId} slot ID "${targetDbId}" state -> ${isUnmutedNow ? 'UNMUTED' : 'MUTED'}`);
+
+        res.json({ success: true, isUnmuted: isUnmutedNow, unmutedSlots });
+    } catch (err: any) {
+        console.error(err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
 // Trigger Playlist Generation manually
 router.post('/generate-playlist', async (req: Request, res: Response) => {
     try {
@@ -356,6 +406,7 @@ router.get('/playlist', async (req: Request, res: Response) => {
                 p.duration, 
                 p.filename, 
                 p.entry_type, 
+                p.unmuted,
                 a.display_name,
                 s.name as slot_name,
                 s.exclude_from_stats

@@ -291,6 +291,9 @@
                             <div class="status-card">
                                 <h3>
                                     <%= container.name %>
+                                    <% if (container.name.includes('tv_hls')) { %>
+                                        <span style="font-size:11px; background:#8e44ad; color:white; border-radius:4px; padding:2px 7px; vertical-align:middle; margin-left:4px;">HLS</span>
+                                    <% } %>
                                 </h3>
                                 <div class="state">
                                     <%= container.status %>
@@ -300,6 +303,8 @@
                                         <%= t.health_badge_healthy %>
                                         <% } else if (container.health==='unhealthy' ) { %>
                                             <%= t.health_badge_unhealthy %>
+                                            <% } else if (container.state === 'paused') { %>
+                                                ⏸ Paused
                                             <% } else { %>
                                                 <%= container.state %> ⚠️
                                                     <% } %>
@@ -312,6 +317,10 @@
                                             onclick="showLogs('<%= container.name %>', 'master')">Logs: Master</button>
                                         <button class="btn-logs" style="background-color: #17a2b8;"
                                             onclick="showLogs('<%= container.name %>', 'feeder')">Logs: Feeder</button>
+                                        <% } %>
+                                    <% if (container.name.includes('tv_hls')) { %>
+                                        <button class="btn-logs" style="background-color: #8e44ad;"
+                                            onclick="showLogs('<%= container.name %>', 'hls')">Logs: HLS</button>
                                         <% } %>
                                 </div>
                             </div>
@@ -340,6 +349,10 @@
         const logsArea = document.getElementById('logsArea');
         const modalTitle = document.getElementById('modalTitle');
         let logsInterval = null;
+        let isUserInteracting = false;
+
+        logsArea.onmousedown = () => { isUserInteracting = true; };
+        document.onmouseup = () => { isUserInteracting = false; };
 
         const MSG_LOGS_LOADING = <%- JSON.stringify(t.health_logs_loading) %>;
         const MSG_LOGS_NONE    = <%- JSON.stringify(t.health_logs_none) %>;
@@ -347,6 +360,14 @@
         const MSG_HTTP_ERROR   = <%- JSON.stringify(t.health_http_error) %>;
 
         async function fetchLogsContent(containerName, logType) {
+            // Do not update if user is selecting text or holding mouse to prevent losing selection
+            const selection = window.getSelection();
+            const hasSelection = selection.toString().length > 0 && logsArea.contains(selection.anchorNode);
+            
+            if (hasSelection || isUserInteracting) {
+                return; // Skip update
+            }
+
             let url = `/health/logs/${containerName}`;
             if (logType === 'master') url = `/health/logs/${containerName}/master`;
             if (logType === 'feeder') url = `/health/logs/${containerName}/feeder`;
@@ -376,16 +397,19 @@
             let titleType = 'App';
             if (logType === 'master') titleType = 'Master FFmpeg';
             if (logType === 'feeder') titleType = 'Feeder FFmpeg';
+            if (logType === 'hls')    titleType = 'HLS FFmpeg';
+            // HLS container logs are docker stdout — map to 'main'
+            const fetchType = logType === 'hls' ? 'main' : logType;
 
             modalTitle.innerText = `Logs: ${containerName} (${titleType})`;
             logsArea.innerText = MSG_LOGS_LOADING;
             modal.style.display = 'block';
 
-            await fetchLogsContent(containerName, logType);
+            await fetchLogsContent(containerName, fetchType);
 
             if (logsInterval) clearInterval(logsInterval);
             logsInterval = setInterval(() => {
-                fetchLogsContent(containerName, logType);
+                fetchLogsContent(containerName, fetchType);
             }, 1000);
         }
 
