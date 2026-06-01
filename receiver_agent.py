@@ -23,7 +23,7 @@ def log(msg):
     print(msg, flush=True)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-AGENT_VERSION   = "2.1.10"               # Auto-incremented by deploy.ps1
+AGENT_VERSION   = "2.1.11"               # Auto-incremented by deploy.ps1
 BEACON_URL      = "udp://226.0.0.1:5004"   # Fixed well-known beacon multicast address
 MPV_SOCKET      = "/tmp/mpvsocket"          # MPV IPC socket path
 REPORT_INTERVAL = 10                     # seconds between status reports
