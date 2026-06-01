@@ -38,6 +38,7 @@ _last_load_attempt  = 0                  # Cooldown for MPV loadfile enforcement
 _last_frame_count   = -1                 # Track rendered frames to detect freezes
 _stall_count        = 0                  # Number of consecutive stall detections
 _ipc_fail_count     = 0                  # Number of consecutive IPC failures
+_last_hdmi_status   = None               # Tracks physical HDMI connection state
 
 # ── Identity ───────────────────────────────────────────────────────────────────
 def get_receiver_id() -> str:
@@ -296,6 +297,44 @@ def ensure_hdmi_hotplug() -> bool:
                 
     return modified
 
+def get_system_uptime() -> float:
+    """Reads system uptime from /proc/uptime."""
+    try:
+        with open("/proc/uptime", "r") as f:
+            return float(f.readline().split()[0])
+    except Exception:
+        return 0.0
+
+def get_hdmi_status() -> str:
+    """Reads the current connection status of all physical HDMI ports."""
+    try:
+        drm_path = "/sys/class/drm"
+        if not os.path.exists(drm_path):
+            return "unknown"
+        
+        connected_any = False
+        disconnected_any = False
+        
+        for name in os.listdir(drm_path):
+            if "HDMI-A" in name:
+                status_file = os.path.join(drm_path, name, "status")
+                if os.path.exists(status_file):
+                    with open(status_file, "r") as f:
+                        status = f.read().strip()
+                        if status == "connected":
+                            connected_any = True
+                        elif status == "disconnected":
+                            disconnected_any = True
+                            
+        if connected_any:
+            return "connected"
+        if disconnected_any:
+            return "disconnected"
+        return "unknown"
+    except Exception as e:
+        log(f"[HDMI] Error reading status: {e}")
+        return "unknown"
+
 # ── Metrics ────────────────────────────────────────────────────────────────────
 
 def get_cpu_usage() -> float:
@@ -356,11 +395,24 @@ def get_traffic_speed() -> float:
 
 # ── Main Loop ──────────────────────────────────────────────────────────────────
 def main():
-    global _server_url, _current_stream_url, _last_frame_count, _stall_count, _ipc_fail_count
+    global _server_url, _current_stream_url, _last_frame_count, _stall_count, _ipc_fail_count, _last_hdmi_status
 
     receiver_id = get_receiver_id()
     hostname    = get_hostname()
     log(f"[Agent] Started — ID: {receiver_id}, Host: {hostname}")
+
+    # ── Initial HDMI Status & Boot Recovery ────────────────────────────────────
+    hdmi_status = get_hdmi_status()
+    log(f"[Agent] Initial HDMI Status: {hdmi_status}")
+    _last_hdmi_status = hdmi_status
+    
+    # Boot Recovery: if system recently booted and HDMI is connected, force MPV restart
+    uptime = get_system_uptime()
+    if uptime > 0 and uptime < 300 and hdmi_status == "connected":
+        log(f"[Agent] System recently booted ({uptime:.1f}s ago) with HDMI connected. Performing one-time MPV restart to ensure clean display binding...")
+        mpv_force_restart()
+        # Give MPV a moment to start up and initialize
+        time.sleep(3)
 
     # ── Phase 0: System Tuning (Reliability) ──────────────────────────────────
     # Execute the tuning script if it exists to ensure network/OS settings are applied
@@ -430,6 +482,16 @@ def main():
     # ── Phase 4: Report loop detector ──────────────────────────────────────────
     while True:
         try:
+            # 0. HDMI HOTPLUG DETECTION AND RECOVERY
+            current_hdmi = get_hdmi_status()
+            if _last_hdmi_status == "disconnected" and current_hdmi == "connected":
+                log("[HDMI] Hotplug detected! HDMI changed from disconnected to connected. Restarting MPV to re-initialize physical display...")
+                mpv_force_restart()
+                _last_hdmi_status = current_hdmi
+                time.sleep(REPORT_INTERVAL)
+                continue
+            _last_hdmi_status = current_hdmi
+
             # 1. ATOMIC STATUS CHECK (One connection per cycle)
             props = mpv_batch_get_properties([
                 "path",
