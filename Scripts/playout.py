@@ -441,6 +441,7 @@ class PlayoutSender:
                         logging.warning(f"[HotReload] Schedule updated signal received — interrupting {filename}")
                         self.reconnect_db()       # Flush MySQL transaction cache
                         self.last_played_id = None  # Don't exclude current entry after regen
+                        self._interrupted_by_hotreload = True
                         break
 
                     # Filler interruption: stop if a real scheduled item is now due
@@ -448,6 +449,7 @@ class PlayoutSender:
                         next_item, next_status = self.get_next_item(silent=True)
                         if next_status == "current":
                             logging.warning(f"Interrupting filler {filename}: scheduled item {next_item['filename']} is now due.")
+                            self._interrupted_by_filler = True
                             break
             
             return True
@@ -500,17 +502,26 @@ class PlayoutSender:
 
             # Only increment ts_offset if master is still alive (not reset after crash)
             if not getattr(self, '_master_crashed', False):
-                # Major reliability fix:
-                # 1. If FFmpeg reported success, always use the known probed duration to keep PTS perfect.
-                # 2. If it crashed/unfinished, use the best available estimate (duration limit or wall clock).
-                if ret == 0 and actual_duration > 0.1:
+                # Handle explicit hotreload or filler interruptions to prevent schedule drift
+                if getattr(self, '_interrupted_by_hotreload', False):
+                    added_offset = wall_elapsed
+                    self.ts_offset += added_offset
+                    # Realign virtual clock to wall clock: current_stream_time becomes datetime.now()
+                    self.stream_start_time = datetime.now() - timedelta(seconds=self.ts_offset)
+                    self._interrupted_by_hotreload = False
+                    logging.info(f"[HotReload] Virtual clock realigned to wall clock (new offset={self.ts_offset:.1f}s).")
+                elif getattr(self, '_interrupted_by_filler', False):
+                    added_offset = wall_elapsed
+                    self.ts_offset += added_offset
+                    self._interrupted_by_filler = False
+                elif ret == 0 and actual_duration > 0.1:
                     added_offset = actual_duration
+                    self.ts_offset += added_offset
                 else:
                     # Fallback for short/crashed/error segments
                     # Use wall elapsed if it's longer than what we thought we streamed, else trust actual_duration probe
                     added_offset = max(wall_elapsed, actual_duration if actual_duration > 0.1 else 0.0)
-                
-                self.ts_offset += added_offset
+                    self.ts_offset += added_offset
             else:
                 # Reset the flag for the next file
                 self._master_crashed = False
@@ -527,11 +538,10 @@ class PlayoutSender:
             current_stream_time = self.stream_start_time + timedelta(seconds=self.ts_offset)
 
             # Safety resync: if virtual clock is > 5 minutes behind wall time (e.g. after a
-            # stuck-loop on missing files), auto-advance to prevent infinite spinning on past items.
+            # stuck-loop on missing files) or > 30 seconds ahead of wall time, auto-align.
             clock_lag = (datetime.now() - current_stream_time).total_seconds()
-            if clock_lag > 300:
-                logging.warning(f"[SafetyResync] Virtual clock is {clock_lag:.0f}s behind wall time — auto-advancing.")
-                self.ts_offset += clock_lag
+            if clock_lag > 300 or clock_lag < -30:
+                logging.warning(f"[SafetyResync] Virtual clock lag is {clock_lag:.0f}s — auto-aligning to wall clock.")
                 self.stream_start_time = datetime.now() - timedelta(seconds=self.ts_offset)
                 continue
 
