@@ -60,7 +60,8 @@ MUXRATE_K=$(( FFMPEG_BITRATE_K * 115 / 100 ))
 mkdir -p /dev/shm/hls
 
 MUX_OPTS="-muxrate ${MUXRATE_K}k -pcr_period 20"
-OUTPUT_URL="udp://127.0.0.1:${UDP_PORT}?pkt_size=1316&flush_packets=1&buffer_size=10000000"
+SOCKET_BITRATE=$(( MUXRATE_K * 1500 ))
+OUTPUT_URL="udp://127.0.0.1:${UDP_PORT}?pkt_size=1316&flush_packets=1&buffer_size=10000000&bitrate=${SOCKET_BITRATE}"
 OUTPUT_FORMAT="mpegts"
 
 RE_FLAG="-re"
