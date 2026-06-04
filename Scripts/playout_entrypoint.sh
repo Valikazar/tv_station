@@ -60,7 +60,7 @@ MUXRATE_K=$(( FFMPEG_BITRATE_K * 115 / 100 ))
 mkdir -p /dev/shm/hls
 
 MUX_OPTS="-muxrate ${MUXRATE_K}k -pcr_period 20"
-OUTPUT_URL="udp://127.0.0.1:${UDP_PORT}?pkt_size=1316&flush_packets=1&buffer_size=10000000&bitrate=${MUXRATE_K}000"
+OUTPUT_URL="udp://127.0.0.1:${UDP_PORT}?pkt_size=1316&flush_packets=1&buffer_size=10000000"
 OUTPUT_FORMAT="mpegts"
 
 RE_FLAG="-re"
@@ -88,6 +88,7 @@ fi
       "$OUTPUT_URL" 2> "/dev/shm/ch${CHANNEL_ID}_master.log"
     RET=$?
     echo "[Master] FFmpeg exited with code $RET — restarting in 2s..."
+    cp "/dev/shm/ch${CHANNEL_ID}_master.log" "/dev/shm/ch${CHANNEL_ID}_master_crash.log"
     sleep 2
   done
 ) &
