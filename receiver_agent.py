@@ -39,6 +39,7 @@ _last_frame_count   = -1                 # Track rendered frames to detect freez
 _stall_count        = 0                  # Number of consecutive stall detections
 _ipc_fail_count     = 0                  # Number of consecutive IPC failures
 _last_hdmi_status   = None               # Tracks physical HDMI connection state
+_stream_load_time   = 0.0                # Tracks wall time when the stream was last loaded
 
 # ── Identity ───────────────────────────────────────────────────────────────────
 def get_receiver_id() -> str:
@@ -205,11 +206,12 @@ def mpv_batch_get_properties(names: list) -> dict:
 
 def mpv_load(url: str) -> bool:
     """Instructs MPV to load a new stream URL. Returns True if IPC command accepted."""
-    global _last_frame_count, _stall_count
+    global _last_frame_count, _stall_count, _stream_load_time
     log(f"[MPV] Loading stream: {url}")
     # Reset counters on new load
     _last_frame_count = -1
     _stall_count = 0
+    _stream_load_time = time.time()
     result = mpv_send(["loadfile", url, "replace"])
     if result is None:
         log(f"[MPV] loadfile failed — IPC socket error")
@@ -395,7 +397,7 @@ def get_traffic_speed() -> float:
 
 # ── Main Loop ──────────────────────────────────────────────────────────────────
 def main():
-    global _server_url, _current_stream_url, _last_frame_count, _stall_count, _ipc_fail_count, _last_hdmi_status
+    global _server_url, _current_stream_url, _last_frame_count, _stall_count, _ipc_fail_count, _last_hdmi_status, _stream_load_time
 
     receiver_id = get_receiver_id()
     hostname    = get_hostname()
@@ -500,7 +502,9 @@ def main():
                 "paused-for-cache", 
                 "eof-reached", 
                 "pause",
-                "volume"
+                "volume",
+                "vo-configured",
+                "current-vo"
             ])
             
             playing = props.get("path")
@@ -522,6 +526,19 @@ def main():
                 continue
             
             _ipc_fail_count = 0
+
+            # 1.5. CHECK FOR ACTIVE HDMI OUTPUT BINDING (HDMI verification)
+            if playing and _current_stream_url and playing == _current_stream_url:
+                vo_configured = props.get("vo-configured")
+                current_vo = props.get("current-vo")
+                # Wait 15 seconds after loading the stream to allow MPV connection to establish
+                if (time.time() - _stream_load_time) > 15:
+                    if current_hdmi != "disconnected" and (vo_configured == False or not current_vo):
+                        log(f"[HDMI] Screen is active but MPV display binding failed (vo-configured: {vo_configured}, vo: {current_vo}). Forcing MPV restart to re-bind...")
+                        mpv_force_restart()
+                        time.sleep(REPORT_INTERVAL)
+                        continue
+
             traffic_speed = get_traffic_speed() # Current speed in bytes/s
 
             # 2. Check for Frozen Playback (Anti-Stuck Logic v7 - Consolidated)
