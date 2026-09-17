@@ -13,6 +13,10 @@ import { execInContainer } from '../services/dockerService';
 // Schema auto-patching from within Docker context to bypass host connectivity issues
 pool.query(`ALTER TABLE ad_videos ADD COLUMN unmuted_slots_ids JSON DEFAULT ('[]')`).catch(() => {});
 pool.query(`ALTER TABLE generated_playlists ADD COLUMN unmuted TINYINT(1) DEFAULT 0`).catch(() => {});
+pool.query(`ALTER TABLE ad_videos ADD COLUMN source_type VARCHAR(16) NOT NULL DEFAULT 'file'`).catch(() => {});
+pool.query(`ALTER TABLE ad_videos ADD COLUMN stream_url VARCHAR(512) DEFAULT NULL`).catch(() => {});
+pool.query(`ALTER TABLE ad_videos ADD COLUMN stream_buffer_sec INT NOT NULL DEFAULT 5`).catch(() => {});
+pool.query(`ALTER TABLE ad_videos ADD COLUMN rotation_end_date DATE DEFAULT NULL`).catch(() => {});
 
 const execAsync = promisify(exec);
 const router = express.Router();
@@ -122,6 +126,8 @@ router.post('/upload', uploadMiddleware, async (req: Request, res: Response) => 
         const file = req.file;
         const displayName = req.body.displayName;
         let selectedSlots = req.body.slots; // These are dbIds now
+        const rotationEndDateRaw = req.body.rotationEndDate as string | undefined;
+        const rotationEndDate = rotationEndDateRaw && rotationEndDateRaw.trim() ? rotationEndDateRaw.trim() : null;
 
         console.log('UPLOAD DEBUG - req.body:', JSON.stringify(req.body));
         console.log('UPLOAD DEBUG - selectedSlots before parsing:', selectedSlots);
@@ -170,8 +176,8 @@ router.post('/upload', uploadMiddleware, async (req: Request, res: Response) => 
 
         // Insert into DB first to get ID
         const [result] = await pool.execute<any>(
-            'INSERT INTO ad_videos (filename, display_name, target_slots_ids, duration, channel_id) VALUES (?, ?, ?, ?, ?)',
-            ['TEMP', displayName || originalName, JSON.stringify(slotIds), duration, channelId]
+            'INSERT INTO ad_videos (filename, display_name, target_slots_ids, duration, channel_id, rotation_end_date) VALUES (?, ?, ?, ?, ?, ?)',
+            ['TEMP', displayName || originalName, JSON.stringify(slotIds), duration, channelId, rotationEndDate]
         );
         const videoId = result.insertId;
 
@@ -381,6 +387,72 @@ router.get('/disk-space', async (req: Request, res: Response) => {
         }
     } catch (e: any) {
         res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// Set or clear the rotation end date for a video
+router.post('/set-rotation-end', async (req: Request, res: Response) => {
+    try {
+        const { videoId, rotationEndDate } = req.body;
+        if (!videoId) return res.status(400).json({ success: false, error: 'videoId required' });
+        const dateVal = rotationEndDate && rotationEndDate.trim() ? rotationEndDate.trim() : null;
+        await pool.execute('UPDATE ad_videos SET rotation_end_date = ? WHERE id = ?', [dateVal, videoId]);
+        const username = req.session?.username || 'unknown';
+        logAction(username, 'SET_ROTATION_END', `video ID ${videoId} -> ${dateVal ?? 'no limit'}`);
+        res.json({ success: true, rotationEndDate: dateVal });
+    } catch (err: any) {
+        console.error('set-rotation-end error:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Add RTSP/HTTP stream as a schedulable entry
+router.post('/add-stream', async (req: Request, res: Response) => {
+    try {
+        const { displayName, streamUrl, durationSec, bufferSec, slots, rotationEndDate } = req.body;
+
+        if (!streamUrl || !streamUrl.trim()) {
+            return res.status(400).json({ success: false, error: 'Stream URL is required' });
+        }
+        if (!durationSec || isNaN(Number(durationSec)) || Number(durationSec) <= 0) {
+            return res.status(400).json({ success: false, error: 'Duration must be a positive number' });
+        }
+
+        const channelId = req.session.currentChannelId || 1;
+        const durationMs = Math.round(Number(durationSec) * 1000);
+        const buffer = Math.max(0, Math.round(Number(bufferSec) || 5));
+        const name = (displayName || streamUrl).trim();
+
+        let slotIds: (string | number)[] = [];
+        if (Array.isArray(slots)) {
+            slotIds = slots.map((id: string) => isNaN(Number(id)) ? id : Number(id));
+        } else if (slots) {
+            slotIds = [isNaN(Number(slots)) ? slots : Number(slots)];
+        }
+
+        // Use a synthetic filename so playout.py can identify it as a stream
+        const tempFilename = `stream_${Date.now()}`;
+        const endDate = rotationEndDate && rotationEndDate.trim() ? rotationEndDate.trim() : null;
+
+        const [result] = await pool.execute<any>(
+            `INSERT INTO ad_videos 
+             (filename, display_name, target_slots_ids, duration, channel_id, source_type, stream_url, stream_buffer_sec, rotation_end_date)
+             VALUES (?, ?, ?, ?, ?, 'stream', ?, ?, ?)`,
+            [tempFilename, name, JSON.stringify(slotIds), durationMs, channelId, streamUrl.trim(), buffer, endDate]
+        );
+        const videoId = result.insertId;
+
+        // Update filename to include ID for uniqueness
+        const finalFilename = `stream_${videoId}`;
+        await pool.execute('UPDATE ad_videos SET filename = ? WHERE id = ?', [finalFilename, videoId]);
+
+        const username = req.session?.username || 'unknown';
+        logAction(username, 'ADD_STREAM', `"${name}" -> ${streamUrl} (${durationSec}s buffer=${buffer}s) slots: [${slotIds.join(', ')}]`);
+
+        res.json({ success: true, videoId });
+    } catch (err: any) {
+        console.error('Add stream error:', err);
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 

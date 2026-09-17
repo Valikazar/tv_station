@@ -219,15 +219,16 @@ app.use('/health', requireAuth, healthRoutes);
 
 // Initialize slots from DB, then start server
 initializeSlots().then(async () => {
-    try {
-        const [activeChannels] = await pool.execute<RowDataPacket[]>('SELECT id FROM channels WHERE status = "active"');
+    // Restore active channels in the background (non-blocking)
+    pool.execute<RowDataPacket[]>('SELECT id FROM channels WHERE status = "active"').then(async ([activeChannels]) => {
         for (const ch of activeChannels) {
             console.log(`[Auto-Start] Restoring active containers for Channel ${ch.id}...`);
             await createAndStartChannelContainers(ch.id).catch((e: any) => console.error(`Failed to restore Channel ${ch.id}:`, e));
         }
-    } catch (e) {
+    }).catch((e) => {
         console.error('Failed to sync active channels with Docker:', e);
-    }
+    });
+
     app.listen(port, () => {
         console.log(`Server running at http://localhost:${port}`);
         startUdpDiscovery();

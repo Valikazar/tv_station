@@ -21,6 +21,67 @@ async function patchSchema() {
             console.log("Patching 'receivers' table: Adding volume columns...");
             await pool.query("ALTER TABLE receivers ADD COLUMN target_volume INT DEFAULT 30 AFTER version, ADD COLUMN actual_volume INT AFTER target_volume");
         }
+
+        const [linkSpeedCols]: any = await pool.query("SHOW COLUMNS FROM receivers LIKE 'link_speed'");
+        if (linkSpeedCols.length === 0) {
+            console.log("Patching 'receivers' table: Adding 'link_speed' column...");
+            await pool.query("ALTER TABLE receivers ADD COLUMN link_speed VARCHAR(20) DEFAULT 'unknown'");
+        }
+
+        const [udpErrorsCols]: any = await pool.query("SHOW COLUMNS FROM receivers LIKE 'udp_errors'");
+        if (udpErrorsCols.length === 0) {
+            console.log("Patching 'receivers' table: Adding 'udp_errors' column...");
+            await pool.query("ALTER TABLE receivers ADD COLUMN udp_errors BIGINT DEFAULT 0");
+        }
+
+        const [udpErrors1hCols]: any = await pool.query("SHOW COLUMNS FROM receivers LIKE 'udp_errors_1h'");
+        if (udpErrors1hCols.length === 0) {
+            console.log("Patching 'receivers' table: Adding 'udp_errors_1h' column...");
+            await pool.query("ALTER TABLE receivers ADD COLUMN udp_errors_1h BIGINT DEFAULT 0 AFTER udp_errors");
+        }
+
+        const [mpvCacheCols]: any = await pool.query("SHOW COLUMNS FROM receivers LIKE 'mpv_cache_duration'");
+        if (mpvCacheCols.length === 0) {
+            console.log("Patching 'receivers' table: Adding 'mpv_cache_duration' column...");
+            await pool.query("ALTER TABLE receivers ADD COLUMN mpv_cache_duration FLOAT DEFAULT 0.0");
+        }
+
+        const [hdmiStatusCols]: any = await pool.query("SHOW COLUMNS FROM receivers LIKE 'hdmi_status'");
+        if (hdmiStatusCols.length === 0) {
+            console.log("Patching 'receivers' table: Adding 'hdmi_status' column...");
+            await pool.query("ALTER TABLE receivers ADD COLUMN hdmi_status VARCHAR(20) DEFAULT 'unknown'");
+        }
+
+        const [hdmiDisconnectedCols]: any = await pool.query("SHOW COLUMNS FROM receivers LIKE 'hdmi_disconnected_at'");
+        if (hdmiDisconnectedCols.length === 0) {
+            console.log("Patching 'receivers' table: Adding 'hdmi_disconnected_at' column...");
+            await pool.query("ALTER TABLE receivers ADD COLUMN hdmi_disconnected_at TIMESTAMP NULL DEFAULT NULL");
+        }
+
+        const [mpvUptimeCols]: any = await pool.query("SHOW COLUMNS FROM receivers LIKE 'mpv_uptime'");
+        if (mpvUptimeCols.length === 0) {
+            console.log("Patching 'receivers' table: Adding 'mpv_uptime' column...");
+            await pool.query("ALTER TABLE receivers ADD COLUMN mpv_uptime INT DEFAULT 0");
+        }
+
+        const [fcsCols]: any = await pool.query("SHOW COLUMNS FROM receivers LIKE 'eth_fcs_errors'");
+        if (fcsCols.length === 0) {
+            console.log("Patching 'receivers' table: Adding 'eth_fcs_errors' column...");
+            await pool.query("ALTER TABLE receivers ADD COLUMN eth_fcs_errors BIGINT DEFAULT 0");
+        }
+
+        const [alignCols]: any = await pool.query("SHOW COLUMNS FROM receivers LIKE 'eth_align_errors'");
+        if (alignCols.length === 0) {
+            console.log("Patching 'receivers' table: Adding 'eth_align_errors' column...");
+            await pool.query("ALTER TABLE receivers ADD COLUMN eth_align_errors BIGINT DEFAULT 0");
+        }
+
+        const [symbolCols]: any = await pool.query("SHOW COLUMNS FROM receivers LIKE 'eth_symbol_errors'");
+        if (symbolCols.length === 0) {
+            console.log("Patching 'receivers' table: Adding 'eth_symbol_errors' column...");
+            await pool.query("ALTER TABLE receivers ADD COLUMN eth_symbol_errors BIGINT DEFAULT 0");
+        }
+
         isSchemaPatched = true;
     } catch (e) {
         console.warn("Schema patch check failed (can be ignored if already patched):", e);
@@ -87,7 +148,16 @@ router.post('/report', async (req: Request, res: Response) => {
             current_source_ip,
             current_stream_url,
             version,
-            actual_volume
+            actual_volume,
+            link_speed,
+            udp_errors,
+            udp_errors_1h,
+            mpv_cache_duration,
+            hdmi_status,
+            mpv_uptime,
+            eth_fcs_errors,
+            eth_align_errors,
+            eth_symbol_errors
         } = req.body;
 
         if (!id) {
@@ -102,9 +172,11 @@ router.post('/report', async (req: Request, res: Response) => {
         await pool.execute(`
             INSERT INTO receivers (
                 id, hostname, ip_address, version, cpu_usage, temperature, 
-                traffic_speed, current_source_ip, actual_stream_url, actual_volume, last_seen
+                traffic_speed, current_source_ip, actual_stream_url, actual_volume,
+                link_speed, udp_errors, udp_errors_1h, mpv_cache_duration, hdmi_status, mpv_uptime,
+                eth_fcs_errors, eth_align_errors, eth_symbol_errors, hdmi_disconnected_at, last_seen
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, IF(? = 'disconnected', CURRENT_TIMESTAMP, NULL), CURRENT_TIMESTAMP)
             ON DUPLICATE KEY UPDATE
                 hostname = VALUES(hostname),
                 ip_address = VALUES(ip_address),
@@ -115,10 +187,25 @@ router.post('/report', async (req: Request, res: Response) => {
                 current_source_ip = VALUES(current_source_ip),
                 actual_stream_url = VALUES(actual_stream_url),
                 actual_volume = VALUES(actual_volume),
+                link_speed = VALUES(link_speed),
+                udp_errors = VALUES(udp_errors),
+                udp_errors_1h = VALUES(udp_errors_1h),
+                mpv_cache_duration = VALUES(mpv_cache_duration),
+                hdmi_status = VALUES(hdmi_status),
+                mpv_uptime = VALUES(mpv_uptime),
+                eth_fcs_errors = VALUES(eth_fcs_errors),
+                eth_align_errors = VALUES(eth_align_errors),
+                eth_symbol_errors = VALUES(eth_symbol_errors),
+                hdmi_disconnected_at = CASE 
+                    WHEN VALUES(hdmi_status) = 'disconnected' THEN COALESCE(hdmi_disconnected_at, CURRENT_TIMESTAMP)
+                    ELSE NULL
+                END,
                 last_seen = CURRENT_TIMESTAMP
         `, [
             id, hostname, ip_address, version || '1.0.0', cpu_usage, temperature,
-            traffic_speed, current_source_ip, current_stream_url, actual_volume || null
+            traffic_speed, current_source_ip, current_stream_url, actual_volume || null,
+            link_speed || 'unknown', udp_errors || 0, udp_errors_1h || 0, mpv_cache_duration || 0.0, hdmi_status || 'unknown',
+            mpv_uptime || 0, eth_fcs_errors || 0, eth_align_errors || 0, eth_symbol_errors || 0, hdmi_status || 'unknown'
         ]);
 
         // Check if there are pending commands or settings sync

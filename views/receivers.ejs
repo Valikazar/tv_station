@@ -21,11 +21,12 @@
         .navbar a { float: left; display: block; color: #f2f2f2; text-align: center; padding: 14px 16px; text-decoration: none; font-size: 17px; }
         .navbar a:hover { background-color: #ddd; color: black; }
         .navbar a.active { background-color: #007bff; color: white; }
-        .container { max-width: 1200px; margin: 20px auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .container { max-width: 98%; margin: 20px auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         h1 { color: #333; margin-bottom: 20px; }
         .stats-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        .stats-table th { background-color: #f8f9fa; padding: 12px; text-align: left; border-bottom: 2px solid #dee2e6; color: #555; }
-        .stats-table td { padding: 12px; border-bottom: 1px solid #eee; vertical-align: middle; }
+        .stats-table th { background-color: #f8f9fa; padding: 10px 8px; text-align: left; border-bottom: 2px solid #dee2e6; color: #555; white-space: nowrap; font-size: 14px; }
+        .stats-table td { padding: 10px 8px; border-bottom: 1px solid #eee; vertical-align: middle; white-space: nowrap; font-size: 14px; }
+        .stats-table td:first-child, .stats-table th:first-child { white-space: normal; }
         .stats-table tr:hover { background-color: #f8f9fa; }
         .status-badge { padding: 4px 8px; border-radius: 12px; font-size: 12px; font-weight: bold; }
         .status-online { background-color: #d4edda; color: #155724; }
@@ -128,8 +129,13 @@
                     <th><%= t.receivers_th_cpu %></th>
                     <th><%= t.receivers_th_temp %></th>
                     <th><%= t.receivers_th_traffic %></th>
+                    <th><%= t.receivers_th_link_speed %></th>
+                    <th><%= t.receivers_th_udp_errors %></th>
+                    <th><%= t.receivers_th_eth_errors %></th>
+                    <th><%= t.receivers_th_mpv_cache %></th>
+                    <th><%= t.receivers_th_hdmi %></th>
+                    <th><%= t.receivers_th_mpv_uptime %></th>
                     <th><%= t.receivers_th_playing %></th>
-                    <th><%= t.receivers_th_source %></th>
                     <th><%= t.receivers_th_last_seen %></th>
                     <th><%= t.receivers_th_actions %></th>
                 </tr>
@@ -156,8 +162,6 @@
                 </select>
                 <input type="text" id="streamUrl" class="form-control" style="margin-top:5px;" placeholder="udp://239.0.0.1:1234">
             </div>
-            <button class="btn btn-primary" onclick="sendCommand()"><%= t.receivers_btn_send_command %></button>
-            <hr>
             <div class="form-group">
                 <label><%= t.receivers_label_nickname %></label>
                 <input type="text" id="receiverNickname" class="form-control" placeholder="e.g. Hallway 1">
@@ -176,6 +180,7 @@
                     <i class="fas fa-sync-alt"></i> <%= t.receivers_btn_reboot %>
                 </button>
             </div>
+            <div id="modalMessage" style="margin-top: 15px; padding: 10px; border-radius: 4px; display: none; font-size: 14px; font-weight: 500; text-align: center;"></div>
         </div>
     </div>
 
@@ -224,8 +229,21 @@
 
                     const realBitrateMbit = r.traffic_speed ? (r.traffic_speed * 8 / 1000000) : null;
                     
-                    let trafficHtml = '-';
-                    
+                    function formatUptime(seconds) {
+                        if (seconds === undefined || seconds === null || seconds <= 0) return '-';
+                        const d = Math.floor(seconds / (3600*24));
+                        const h = Math.floor((seconds % (3600*24)) / 3600);
+                        const m = Math.floor((seconds % 3600) / 60);
+                        const s = Math.floor(seconds % 60);
+                        
+                        const parts = [];
+                        if (d > 0) parts.push(`${d}d`);
+                        if (h > 0 || d > 0) parts.push(`${h}h`);
+                        if (m > 0 || h > 0 || d > 0) parts.push(`${m}m`);
+                        parts.push(`${s}s`);
+                        return parts.join(' ');
+                    }
+
                     if (realBitrateMbit !== null) {
                         const realStr = realBitrateMbit.toFixed(2);
                         if (plannedBitrateMbit !== null) {
@@ -233,13 +251,80 @@
                             const diffPercent = Math.abs(realBitrateMbit - plannedBitrateMbit) / plannedBitrateMbit;
                             
                             if (diffPercent >= 0.15) {
-                                trafficHtml = `<span style="color: #d9534f; font-weight: bold; background-color: #fdf7f7; border: 1px solid #d9534f; padding: 2px 6px; border-radius: 4px;" title="Deviation: ${(diffPercent * 100).toFixed(1)}%">${plannedStr} / ${realStr} Mbit/s</span>`;
+                                trafficHtml = `<span style="color: #d9534f; font-weight: bold; background-color: #fdf7f7; border: 1px solid #d9534f; padding: 2px 6px; border-radius: 4px;" title="Deviation: ${(diffPercent * 100).toFixed(1)}%">${realStr} / ${plannedStr} Mbit/s</span>`;
                             } else {
-                                trafficHtml = `${plannedStr} / ${realStr} Mbit/s`;
+                                trafficHtml = `${realStr} / ${plannedStr} Mbit/s`;
                             }
                         } else {
-                            trafficHtml = `- / ${realStr} Mbit/s`;
+                            trafficHtml = `${realStr} / - Mbit/s`;
                         }
+                    }
+
+                    let linkSpeedHtml = r.link_speed || '-';
+                    if (linkSpeedHtml === '1000 Mbps') {
+                        linkSpeedHtml = `<span style="color: #28a745; font-weight: 500;">1 Gbps</span>`;
+                    } else if (linkSpeedHtml === '100 Mbps') {
+                        linkSpeedHtml = `<span style="color: #ff9800; font-weight: bold;" title="Degraded link speed! Check cable."><i class="fas fa-exclamation-triangle"></i> 100 Mbps</span>`;
+                    } else if (linkSpeedHtml === 'down') {
+                        linkSpeedHtml = `<span style="color: #d9534f; font-weight: bold;">Down</span>`;
+                    }
+
+                    const udpErrors1h = r.udp_errors_1h !== undefined && r.udp_errors_1h !== null ? r.udp_errors_1h : 0;
+                    const udpErrorsTotal = r.udp_errors !== undefined && r.udp_errors !== null ? r.udp_errors : 0;
+                    let udpErrorsHtml = '0';
+                    if (udpErrors1h > 0) {
+                        udpErrorsHtml = `<span style="color: #d9534f; font-weight: bold;" title="UDP errors: ${udpErrors1h} in last hour, ${udpErrorsTotal} total">${udpErrors1h.toLocaleString()} <span style="font-size: 0.85em; color: #666; font-weight: normal;">(${udpErrorsTotal.toLocaleString()})</span></span>`;
+                    } else if (udpErrorsTotal > 0) {
+                        udpErrorsHtml = `<span style="color: #666;" title="UDP errors: 0 in last hour, ${udpErrorsTotal} total">0 <span style="font-size: 0.85em; color: #999;">(${udpErrorsTotal.toLocaleString()})</span></span>`;
+                    }
+
+                    const fcs = r.eth_fcs_errors || 0;
+                    const align = r.eth_align_errors || 0;
+                    const symbol = r.eth_symbol_errors || 0;
+                    let ethErrorsHtml = `<span style="color: #666;">0 / 0 / 0</span>`;
+                    if (fcs > 0 || align > 0 || symbol > 0) {
+                        const fcsStyle = fcs > 0 ? 'color: #d9534f; font-weight: bold;' : 'color: #666;';
+                        const alignStyle = align > 0 ? 'color: #d9534f; font-weight: bold;' : 'color: #666;';
+                        const symbolStyle = symbol > 0 ? 'color: #d9534f; font-weight: bold;' : 'color: #666;';
+                        ethErrorsHtml = `
+                            <span style="${fcsStyle}" title="FCS (CRC) Errors">${fcs.toLocaleString()}</span> /
+                            <span style="${alignStyle}" title="Alignment Errors">${align.toLocaleString()}</span> /
+                            <span style="${symbolStyle}" title="Symbol (Code) Errors">${symbol.toLocaleString()}</span>
+                        `;
+                    }
+
+                    let cacheHtml = '-';
+                    if (r.mpv_cache_duration !== undefined && r.mpv_cache_duration !== null) {
+                        const dur = r.mpv_cache_duration;
+                        cacheHtml = `${dur.toFixed(1)}s`;
+                        if (dur < 0.5) {
+                            cacheHtml = `<span style="color: #d9534f; font-weight: bold;" title="Low player buffer! Stream is starving."><i class="fas fa-exclamation-circle"></i> ${cacheHtml}</span>`;
+                        } else if (dur < 1.5) {
+                            cacheHtml = `<span style="color: #ff9800; font-weight: 500;">${cacheHtml}</span>`;
+                        } else {
+                            cacheHtml = `<span style="color: #28a745; font-weight: 500;">${cacheHtml}</span>`;
+                        }
+                    }
+
+                    let hdmiHtml = '-';
+                    if (r.hdmi_status && r.hdmi_status.includes('HDMI-A')) {
+                        const portNum = r.hdmi_status.split('-').pop();
+                        hdmiHtml = `<span style="color: #28a745; font-weight: 500;"><i class="fas fa-tv"></i> HDMI ${portNum}</span>`;
+                    } else if (r.hdmi_status === 'connected') {
+                        hdmiHtml = `<span style="color: #28a745; font-weight: 500;"><i class="fas fa-tv"></i> Connected</span>`;
+                    } else if (r.hdmi_status === 'disconnected') {
+                        let timeStr = '';
+                        if (r.hdmi_disconnected_at) {
+                            try {
+                                const discDate = new Date(r.hdmi_disconnected_at);
+                                timeStr = ` <span style="font-size: 0.85em; font-weight: normal; color: #888;">(${discDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'})})</span>`;
+                            } catch(e) {}
+                        }
+                        hdmiHtml = `<span style="color: #d9534f; font-weight: bold;"><i class="fas fa-tv"></i> Off${timeStr}</span>`;
+                    } else if (r.hdmi_status === 'unknown' || !r.hdmi_status) {
+                        hdmiHtml = `<span style="color: #666;">Unknown</span>`;
+                    } else {
+                        hdmiHtml = `<span style="color: #28a745; font-weight: 500;"><i class="fas fa-tv"></i> ${r.hdmi_status}</span>`;
                     }
 
                     const tr = document.createElement('tr');
@@ -253,8 +338,13 @@
                         <td>${r.cpu_usage ? r.cpu_usage.toFixed(1) + '%' : '-'}</td>
                         <td>${r.temperature ? r.temperature.toFixed(1) + '°C' : '-'}</td>
                         <td>${trafficHtml}</td>
+                        <td>${linkSpeedHtml}</td>
+                        <td>${udpErrorsHtml}</td>
+                        <td>${ethErrorsHtml}</td>
+                        <td>${cacheHtml}</td>
+                        <td>${hdmiHtml}</td>
+                        <td style="font-family: monospace;">${formatUptime(r.mpv_uptime)}</td>
                         <td>${getChannelName(r.actual_stream_url)}</td>
-                        <td>${r.current_source_ip || '-'}</td>
                         <td title="${lastSeen.toLocaleString()}">
                             <span class="status-badge ${statusClass}">${statusText}</span>
                         </td>
@@ -286,6 +376,13 @@
         function openModal(id, hostname) {
             selectedReceiverId = id;
             document.getElementById('modalTitle').innerText = '<%= t.receivers_modal_title %>'.replace('%s', hostname);
+            
+            // Clear status message
+            const msgEl = document.getElementById('modalMessage');
+            if (msgEl) {
+                msgEl.style.display = 'none';
+                msgEl.innerText = '';
+            }
             
             // Find current data from cache
             const r = window.lastReceiverData ? window.lastReceiverData.find(x => x.id === id) : null;
@@ -325,25 +422,6 @@
             document.getElementById('commandModal').style.display = 'none';
         }
 
-        async function sendCommand() {
-            const url = document.getElementById('streamUrl').value;
-            if (!url) return alert('Enter URL');
-
-            try {
-                const res = await fetch(`/api/receivers/${selectedReceiverId}/command`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ stream_url: url })
-                });
-                if (res.ok) {
-                    alert('<%= t.receivers_js_command_sent %>');
-                    closeModal();
-                }
-            } catch (e) {
-                alert('Error sending command');
-            }
-        }
-
         async function deleteReceiver(id) {
             if (!confirm('Are you sure you want to delete this receiver?')) return;
             try {
@@ -360,30 +438,108 @@
             const nick = document.getElementById('receiverNickname').value;
             const loc = document.getElementById('receiverLocation').value;
             const vol = document.getElementById('receiverVolume').value;
+            const url = document.getElementById('streamUrl').value;
+            
+            const msgEl = document.getElementById('modalMessage');
+            if (msgEl) {
+                msgEl.style.display = 'none';
+                msgEl.innerText = '';
+            }
+
             try {
-                const res = await fetch(`/api/receivers/${selectedReceiverId}/details`, {
+                // 1. Update details (nickname, location, volume)
+                const detailsRes = await fetch(`/api/receivers/${selectedReceiverId}/details`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ nickname: nick, location: loc, volume: parseInt(vol) })
                 });
-                if (res.ok) {
-                    alert('<%= t.receivers_js_details_saved %>');
-                    loadReceivers();
+                
+                if (!detailsRes.ok) {
+                    throw new Error('Error updating details');
                 }
+
+                // 2. Check if channel should be changed (if url is provided)
+                let commandSent = false;
+                if (url) {
+                    const r = window.lastReceiverData ? window.lastReceiverData.find(x => x.id === selectedReceiverId) : null;
+                    const originalUrl = r ? (r.current_stream_url || "") : "";
+                    
+                    // Send command if URL changed
+                    if (url !== originalUrl) {
+                        const cmdRes = await fetch(`/api/receivers/${selectedReceiverId}/command`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ stream_url: url })
+                        });
+                        if (!cmdRes.ok) {
+                            throw new Error('Error sending command');
+                        }
+                        commandSent = true;
+                    }
+                }
+
+                // Render success status message inside the modal
+                if (msgEl) {
+                    msgEl.style.backgroundColor = '#d4edda';
+                    msgEl.style.color = '#155724';
+                    msgEl.style.border = '1px solid #c3e6cb';
+                    msgEl.style.display = 'block';
+                    if (commandSent) {
+                        msgEl.innerText = '<%= t.receivers_js_details_saved %> & <%= t.receivers_js_command_sent %>';
+                    } else {
+                        msgEl.innerText = '<%= t.receivers_js_details_saved %>';
+                    }
+                }
+
+                loadReceivers();
+
+                // Auto-close modal after 1.5 seconds so the user doesn't have to close it manually
+                setTimeout(() => {
+                    closeModal();
+                }, 1500);
+
             } catch (e) {
-                alert('Error updating details');
+                if (msgEl) {
+                    msgEl.style.backgroundColor = '#f8d7da';
+                    msgEl.style.color = '#721c24';
+                    msgEl.style.border = '1px solid #f5c6cb';
+                    msgEl.style.display = 'block';
+                    msgEl.innerText = e.message || 'Error updating receiver settings';
+                }
             }
         }
 
         async function rebootReceiver() {
             if (!confirm('<%= t.receivers_js_reboot_confirm %>')) return;
+            const msgEl = document.getElementById('modalMessage');
+            if (msgEl) {
+                msgEl.style.display = 'none';
+                msgEl.innerText = '';
+            }
             try {
                 const res = await fetch(`/api/receivers/${selectedReceiverId}/reboot`, { method: 'POST' });
                 if (res.ok) {
-                    closeModal();
+                    if (msgEl) {
+                        msgEl.style.backgroundColor = '#d4edda';
+                        msgEl.style.color = '#155724';
+                        msgEl.style.border = '1px solid #c3e6cb';
+                        msgEl.style.display = 'block';
+                        msgEl.innerText = '<%= t.receivers_js_reboot_queued %>';
+                    }
+                    setTimeout(() => {
+                        closeModal();
+                    }, 1500);
+                } else {
+                    throw new Error('Error sending reboot command');
                 }
             } catch (e) {
-                alert('Error sending reboot command');
+                if (msgEl) {
+                    msgEl.style.backgroundColor = '#f8d7da';
+                    msgEl.style.color = '#721c24';
+                    msgEl.style.border = '1px solid #f5c6cb';
+                    msgEl.style.display = 'block';
+                    msgEl.innerText = e.message || 'Error sending reboot command';
+                }
             }
         }
 

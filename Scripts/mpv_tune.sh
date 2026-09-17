@@ -14,9 +14,26 @@ CONFIG_FILE="$CONFIG_DIR/mpv.conf"
 mkdir -p "$CONFIG_DIR"
 chown "$TARGET_USER":"$TARGET_USER" "$CONFIG_DIR"
 
-# 2. Hardware/Audio Detection
-HDMI_PORT=$(grep -H "^connected" /sys/class/drm/card*-*/status | head -n 1 | cut -d'/' -f5)
-[ -n "$HDMI_PORT" ] && echo "Detected connected port: $HDMI_PORT"
+# 2. Hardware/Audio Detection with EDID verification
+HDMI_PORT=""
+for port_path in /sys/class/drm/card*-HDMI-A-*; do
+    if [ -f "$port_path/status" ]; then
+        status=$(cat "$port_path/status")
+        if [ "$status" = "connected" ]; then
+            connector=$(basename "$port_path" | cut -d'-' -f2-)
+            if [ -f "$port_path/edid" ] && [ "$(wc -c < "$port_path/edid")" -gt 0 ]; then
+                HDMI_PORT="$connector"
+                echo "Detected connected port with valid EDID: $HDMI_PORT"
+                break
+            fi
+            if [ -z "$HDMI_PORT" ]; then
+                HDMI_PORT="$connector"
+            fi
+        fi
+    fi
+done
+
+[ -n "$HDMI_PORT" ] && echo "Selected connector: $HDMI_PORT"
 
 # Find ALSA card index for HDMI
 CARD_IDX=$(aplay -l | grep -i "hdmi" | head -n 1 | cut -d' ' -f2 | tr -d ':')
@@ -73,6 +90,9 @@ vd-lavc-threads=$VD_LAVC_THREADS
 
 # Force FullHD Resolution (Never 4K)
 drm-mode=1920x1080
+
+# Force DRM Connector
+$( [ -n "$HDMI_PORT" ] && echo "drm-connector=$HDMI_PORT" || echo "# drm-connector=auto" )
 
 # Disable Heavy GPU Shaders (Bilinear Only)
 scale=bilinear

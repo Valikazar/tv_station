@@ -233,7 +233,7 @@ const ru: Locale = {
     receivers_th_volume: 'Громк.',
     receivers_th_cpu: 'ЦП',
     receivers_th_temp: 'Темп.',
-    receivers_th_traffic: 'Битрейт (План/Факт)',
+    receivers_th_traffic: 'Битрейт (Факт/План)',
     receivers_th_playing: 'Играет канал',
     receivers_th_source: 'IP источника',
     receivers_th_last_seen: 'В сети',
@@ -255,6 +255,12 @@ const ru: Locale = {
     receivers_btn_reboot: 'Перезагрузить приёмник',
     receivers_js_reboot_confirm: 'Вы уверены, что хотите перезагрузить этот приёмник?',
     receivers_js_reboot_queued: 'Команда на перезагрузку отправлена',
+    receivers_th_link_speed: 'Сетевой линк',
+    receivers_th_udp_errors: 'Ошибки UDP (1ч/Всего)',
+    receivers_th_mpv_cache: 'Буфер',
+    receivers_th_hdmi: 'HDMI',
+    receivers_th_mpv_uptime: 'Время работы MPV',
+    receivers_th_eth_errors: 'Ошибки Eth (FCS/Align/Code)',
 };
 
 export default ru;

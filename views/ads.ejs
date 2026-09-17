@@ -301,6 +301,7 @@
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
             <div style="display: flex; gap: 10px;">
                 <button class="primary-btn" id="addBtn" style="margin-bottom: 0;"><i class="fas fa-plus"></i> <%= t.ads_btn_add %></button>
+                <button class="primary-btn" id="addStreamBtn" style="margin-bottom: 0; background: #6f42c1;"><i class="fas fa-satellite-dish"></i> Add Stream</button>
                 <button class="primary-btn" id="generatePlaylistBtn" style="background: #6c757d; margin-bottom: 0;"><i
                         class="fas fa-sync-alt"></i> <%= t.ads_btn_refresh_schedule %></button>
                 <button class="primary-btn" id="viewPlaylistBtn" style="background: #17a2b8; margin-bottom: 0;"><i
@@ -343,6 +344,7 @@
                                     </th>
                                     <% } %>
                                         <th><%= t.ads_th_date %></th>
+                                        <th style="white-space:nowrap; min-width:120px;">Конец ротации</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -368,7 +370,7 @@
                                                 <button class="action-btn" style="background-color: <%= isUnmuted ? '#17a2b8' : '#6c757d' %>; color: white;" title="<%= isUnmuted ? 'Выключить звук' : 'Включить звук' %>" onclick="toggleMute('<%= video.id %>', '<%= slot.dbId %>')">
                                                     <i class="fas <%= isUnmuted ? 'fa-volume-up' : 'fa-volume-mute' %>"></i>
                                                 </button>
-                                                <button class="action-btn btn-delete" onclick="confirmRemove('<%= video.id %>', '<%= slot.dbId %>')">
+                                                <button class="action-btn btn-delete" onclick="removeFromSlot('<%= video.id %>', '<%= slot.dbId %>')">
                                                     <i class="fas fa-trash"></i>
                                                 </button>
                                             </div>
@@ -387,7 +389,7 @@
                                                         <button class="action-btn" style="background-color: <%= isArchUnmuted ? '#17a2b8' : '#6c757d' %>; color: white;" title="<%= isArchUnmuted ? 'Выключить звук' : 'Включить звук' %>" onclick="toggleMute('<%= video.id %>', '<%= archiveSlot.id %>')">
                                                             <i class="fas <%= isArchUnmuted ? 'fa-volume-up' : 'fa-volume-mute' %>"></i>
                                                         </button>
-                                                        <button class="action-btn btn-delete" title="<%= t.ads_js_remove_permanently %>" onclick="confirmRemove('<%= video.id %>', '<%= archiveSlot.id %>')">
+                                                        <button class="action-btn btn-delete" title="<%= t.ads_js_remove_permanently %>" onclick="removeFromSlot('<%= video.id %>', '<%= archiveSlot.id %>')">
                                                             <i class="fas fa-fire"></i>
                                                         </button>
                                                     </div>
@@ -401,10 +403,94 @@
                                                 <td style="white-space: nowrap;">
                                                     <%= video.created_at ? new Date(video.created_at).toLocaleDateString(lang === "ru" ? "ru-RU" : "en-US") : '-' %>
                                                 </td>
+                                                <td style="white-space: nowrap; text-align:center;">
+                                                    <% 
+                                                        const endDate = video.rotation_end_date ? new Date(video.rotation_end_date) : null;
+                                                        const todayDate = new Date(); todayDate.setHours(0,0,0,0);
+                                                        const isExpired = endDate && endDate < todayDate;
+                                                        const endDateStr = endDate ? endDate.toISOString().split('T')[0] : null;
+                                                        const endDateDisplay = endDate ? endDate.toLocaleDateString(lang === "ru" ? "ru-RU" : "en-US") : null;
+                                                    %>
+                                                    <div style="display:flex; align-items:center; gap:4px; justify-content:center;">
+                                                        <% if (endDateDisplay) { %>
+                                                            <span id="end-date-<%= video.id %>" style="font-size:12px; color:<%= isExpired ? '#c00' : '#333' %>; font-weight:<%= isExpired ? 'bold' : 'normal' %>;" title="<%= isExpired ? 'Просрочено' : '' %>">
+                                                                <%= isExpired ? '⚠ ' : '' %><%= endDateDisplay %>
+                                                            </span>
+                                                        <% } else { %>
+                                                            <span id="end-date-<%= video.id %>" style="font-size:12px; color:#aaa;">∞</span>
+                                                        <% } %>
+                                                        <button class="action-btn" style="padding:2px 5px; font-size:11px; background:#17a2b8; color:#fff;" title="Изменить дату окончания ротации" onclick="openEditExpiry(<%= video.id %>, '<%= endDateStr || '' %>')">
+                                                            <i class="fas fa-calendar-alt"></i>
+                                                        </button>
+                                                    </div>
+                                                </td>
                         </tr>
                         <% }); %>
                 </tbody>
             </table>
+        </div>
+    </div>
+
+    <!-- Add Stream Modal -->
+    <div id="addStreamModal" class="modal">
+        <div class="modal-content" style="width: 520px; margin: 8vh auto;">
+            <span class="close" onclick="closeModal('addStreamModal')">&times;</span>
+            <h2 style="margin-bottom:4px;"><i class="fas fa-satellite-dish" style="color:#6f42c1;"></i> Add Live Stream</h2>
+            <p style="color:#666; font-size:13px; margin-top:4px; margin-bottom:18px;">&#1044;&#1086;&#1073;&#1072;&#1074;&#1080;&#1090;&#1100; IP-&#1082;&#1072;&#1084;&#1077;&#1088;&#1091; &#1080;&#1083;&#1080; RTSP/HTTP &#1087;&#1086;&#1090;&#1086;&#1082; &#1074; &#1088;&#1072;&#1089;&#1087;&#1080;&#1089;&#1072;&#1085;&#1080;&#1077;</p>
+            <div class="form-group">
+                <label for="streamDisplayName">&#1053;&#1072;&#1079;&#1074;&#1072;&#1085;&#1080;&#1077; <span style="color:#666; font-weight:normal;">(&#1086;&#1090;&#1086;&#1073;&#1088;&#1072;&#1078;&#1072;&#1077;&#1090;&#1089;&#1103; &#1074; &#1087;&#1083;&#1077;&#1081;&#1083;&#1080;&#1089;&#1090;&#1077;)</span></label>
+                <input type="text" id="streamDisplayName" placeholder="&#1057;&#1087;&#1086;&#1088;&#1090;&#1079;&#1072;&#1083;-2 (&#1082;&#1072;&#1084;&#1077;&#1088;&#1072; 1)" style="width:100%; padding:8px; box-sizing:border-box; border:1px solid #ccc; border-radius:4px;">
+            </div>
+            <div class="form-group">
+                <label for="streamUrl">RTSP / HTTP URL <span style="color:#c00;">*</span></label>
+                <input type="text" id="streamUrl" placeholder="rtsp://user:pass@192.168.140.115:554/cam/realmonitor?channel=1&amp;subtype=0" style="width:100%; padding:8px; box-sizing:border-box; border:1px solid #ccc; border-radius:4px; font-family:monospace; font-size:12px;">
+                <small style="color:#888;">&#1055;&#1086;&#1076;&#1076;&#1077;&#1088;&#1078;&#1080;&#1074;&#1072;&#1077;&#1090;&#1089;&#1103;: rtsp://, rtmp://, http:// (MJPEG/HLS)</small>
+            </div>
+            <div style="display:flex; gap:16px;">
+                <div class="form-group" style="flex:1;">
+                    <label>&#1044;&#1083;&#1080;&#1090;&#1077;&#1083;&#1100;&#1085;&#1086;&#1089;&#1090;&#1100; <span style="color:#c00;">*</span></label>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <input type="number" id="streamDurationMin" min="0" max="1440" value="5" style="width:70px; padding:8px; border:1px solid #ccc; border-radius:4px; text-align:center;">
+                        <span style="color:#666;">&#1084;&#1080;&#1085;</span>
+                        <input type="number" id="streamDurationSec" min="0" max="59" value="0" style="width:70px; padding:8px; border:1px solid #ccc; border-radius:4px; text-align:center;">
+                        <span style="color:#666;">&#1089;&#1077;&#1082;</span>
+                    </div>
+                    <small style="color:#888;">&#1057;&#1082;&#1086;&#1083;&#1100;&#1082;&#1086; &#1074;&#1086;&#1089;&#1087;&#1088;&#1086;&#1080;&#1079;&#1074;&#1086;&#1076;&#1080;&#1090;&#1100; &#1087;&#1086;&#1090;&#1086;&#1082;</small>
+                </div>
+                <div class="form-group" style="flex:1;">
+                    <label>&#1041;&#1091;&#1092;&#1077;&#1088;&#1080;&#1079;&#1072;&#1094;&#1080;&#1103; <span title="FFmpeg &#1085;&#1072;&#1095;&#1085;&#1105;&#1090; &#1072;&#1085;&#1072;&#1083;&#1080;&#1079;&#1080;&#1088;&#1086;&#1074;&#1072;&#1090;&#1100; &#1087;&#1086;&#1090;&#1086;&#1082; &#1079;&#1072; &#1101;&#1090;&#1086; &#1074;&#1088;&#1077;&#1084;&#1103; &#1076;&#1086; &#1085;&#1072;&#1095;&#1072;&#1083;&#1072; &#1074;&#1077;&#1097;&#1072;&#1085;&#1080;&#1103;. &#1059;&#1089;&#1090;&#1088;&#1072;&#1085;&#1103;&#1077;&#1090; &#1079;&#1072;&#1076;&#1077;&#1088;&#1078;&#1082;&#1080; &#1087;&#1088;&#1080; &#1089;&#1090;&#1072;&#1088;&#1090;&#1077;." style="cursor:help; color:#17a2b8;">&#9432;</span></label>
+                    <div style="display:flex; gap:6px; align-items:center;">
+                        <input type="range" id="streamBufferRange" min="1" max="15" value="5" oninput="document.getElementById('streamBufferVal').textContent=this.value" style="flex:1;">
+                        <strong id="streamBufferVal" style="min-width:20px; color:#6f42c1;">5</strong>
+                        <span style="color:#666;">&#1089;&#1077;&#1082;</span>
+                    </div>
+                    <small style="color:#888;">5&#8211;10 &#1089;&#1077;&#1082; &#1076;&#1083;&#1103; &#1082;&#1072;&#1084;&#1077;&#1088; &#1087;&#1086; LAN</small>
+                </div>
+            </div>
+            <div class="form-group" style="margin-top:4px;">
+                <label>&#1057;&#1083;&#1086;&#1090;&#1099; &#1088;&#1072;&#1089;&#1087;&#1080;&#1089;&#1072;&#1085;&#1080;&#1103; <span style="color:#c00;">*</span></label>
+                <div class="slots-grid" id="streamSlotsGrid" style="margin-top:8px;">
+                    <% slots.forEach(function(slot) { %>
+                        <div>
+                            <input type="checkbox" id="sstr_<%= slot.dbId %>" name="streamSlots" value="<%= slot.dbId %>">
+                            <label for="sstr_<%= slot.dbId %>" style="display:inline; font-weight:normal;"><%= slot.label %></label>
+                        </div>
+                    <% }); %>
+                </div>
+            </div>
+            <div id="streamAddError" style="display:none; color:#c00; font-size:13px; margin-top:8px;"></div>
+            <div class="form-group" style="margin-top:12px;">
+                <label for="streamRotationEndDate" style="display:flex; align-items:center; gap:6px;">
+                    <i class="fas fa-calendar-times" style="color:#e67e22;"></i>
+                    Конец ротации
+                    <span style="color:#666; font-weight:normal; font-size:12px;">(необязательно, по умолчанию — без ограничений)</span>
+                </label>
+                <input type="date" id="streamRotationEndDate" style="padding:8px; border:1px solid #ccc; border-radius:4px; width:180px;">
+                <small style="color:#888; display:block; margin-top:3px;">После этой даты стрим перестанет попадать в эфир</small>
+            </div>
+            <button id="submitStreamBtn" onclick="submitAddStream()" style="margin-top:20px; width:100%; padding:12px; background:#6f42c1; color:white; border:none; border-radius:4px; font-size:16px; cursor:pointer;">
+                <i class="fas fa-plus-circle"></i> &#1044;&#1086;&#1073;&#1072;&#1074;&#1080;&#1090;&#1100; &#1087;&#1086;&#1090;&#1086;&#1082;
+            </button>
         </div>
     </div>
 
@@ -447,6 +533,16 @@
                         style="display: none;">
                 </div>
 
+                <div class="form-group" style="margin-top:12px;">
+                    <label for="uploadRotationEndDate" style="display:flex; align-items:center; gap:6px;">
+                        <i class="fas fa-calendar-times" style="color:#e67e22;"></i>
+                        Конец ротации
+                        <span style="color:#666; font-weight:normal; font-size:12px;">(необязательно)</span>
+                    </label>
+                    <input type="date" id="uploadRotationEndDate" name="rotationEndDate" style="padding:8px; border:1px solid #ccc; border-radius:4px; width:180px;">
+                    <small style="color:#888; display:block; margin-top:3px;">После этой даты файл перестанет попадать в эфир</small>
+                </div>
+
                 <button type="submit" class="primary-btn"
                     style="margin-top:20px; width:100%; transition: all 0.3s ease;" id="submitBtn"><%= t.ads_upload_btn %></button>
 
@@ -462,17 +558,7 @@
         </div>
     </div>
 
-    <div id="deleteModal" class="modal">
-        <div class="modal-content">
-            <h2><%= t.ads_delete_title %></h2>
-            <p id="deleteMsg"></p>
-            <p id="deleteWarning" class="warning-text" style="display: none;"></p>
-            <div class="modal-footer">
-                <button class="primary-btn" style="background:#666" onclick="closeModal('deleteModal')"><%= t.ads_delete_btn_cancel %></button>
-                <button class="primary-btn" id="confirmDeleteBtn" style="background:#ff4d4d"><%= t.ads_delete_btn_confirm %></button>
-            </div>
-        </div>
-    </div>
+
 
     <!-- Playlist Viewer Modal -->
     <div id="playlistModal" class="modal">
@@ -504,6 +590,25 @@
             <div class="modal-footer">
                 <button class="primary-btn" style="background:#6c757d"
                     onclick="closeModal('playlistModal')"><%= t.ads_playlist_btn_close %></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Rotation End Date Modal -->
+    <div id="editExpiryModal" class="modal">
+        <div class="modal-content" style="width: 420px; margin: 20vh auto;">
+            <span class="close" onclick="closeModal('editExpiryModal')">&times;</span>
+            <h2><i class="fas fa-calendar-times" style="color:#e67e22;"></i> Конец ротации</h2>
+            <p style="color:#666; font-size:13px; margin-bottom:16px;">Укажите дату, после которой материал перестанет попадать в генератор плейлиста. Оставьте пустым — без ограничений.</p>
+            <input type="hidden" id="editExpiryVideoId">
+            <div class="form-group">
+                <label for="editExpiryDate">Дата окончания ротации</label>
+                <input type="date" id="editExpiryDate" style="width:100%; padding:10px; border:1px solid #ccc; border-radius:4px; font-size:15px; box-sizing:border-box;">
+            </div>
+            <div id="editExpiryError" style="display:none; color:#c00; font-size:13px; margin-top:6px;"></div>
+            <div style="display:flex; gap:10px; margin-top:20px;">
+                <button onclick="clearExpiryDate()" style="flex:1; padding:10px; background:#6c757d; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:14px;"><i class="fas fa-infinity"></i> Без ограничений</button>
+                <button id="saveExpiryBtn" onclick="saveExpiryDate()" style="flex:2; padding:10px; background:#e67e22; color:#fff; border:none; border-radius:4px; cursor:pointer; font-size:14px;"><i class="fas fa-save"></i> Сохранить</button>
             </div>
         </div>
     </div>
@@ -713,28 +818,7 @@
             }
         }
 
-        let pendingDelete = null;
-
-        function confirmRemove(videoId, slotId) {
-            const videoName = document.getElementById(`video-name-${videoId}`).innerText;
-            const slotName = SLOT_LABELS[slotId] || slotId;
-            const isLastInSlot = SLOT_COUNTS[slotId] <= 1;
-
-            pendingDelete = { videoId, slotId };
-            document.getElementById('deleteMsg').innerText = MSG_CONFIRM_REMOVE.replace('%s', videoName).replace('%s', slotName);
-
-            const warnEl = document.getElementById('deleteWarning');
-            warnEl.innerText = MSG_LAST_WARN;
-            warnEl.style.display = isLastInSlot ? 'block' : 'none';
-
-            document.getElementById('deleteModal').style.display = 'block';
-        }
-
-        document.getElementById('confirmDeleteBtn').onclick = async () => {
-            if (!pendingDelete) return;
-            const { videoId, slotId } = pendingDelete;
-            closeModal('deleteModal');
-
+        async function removeFromSlot(videoId, slotId) {
             const cell = document.getElementById(`cell-${videoId}-${slotId}`);
             if (!cell) return;
             const originalHtml = cell.innerHTML;
@@ -765,7 +849,9 @@
                 alert(MSG_SERVER_ERROR);
                 cell.innerHTML = originalHtml;
             }
-        };
+        }
+
+        const confirmRemove = removeFromSlot;
 
         async function toggleMute(videoId, slotId) {
             const cell = document.getElementById(`cell-${videoId}-${slotId}`);
@@ -794,7 +880,7 @@
                                 <i class="fas ${isUnmuted ? 'fa-volume-up' : 'fa-volume-mute'}"></i>
                             </button>
                             <button class="action-btn ${btnClass}" title="${title}"
-                                    onclick="confirmRemove('${videoId}', '${slotId}')">
+                                    onclick="removeFromSlot('${videoId}', '${slotId}')">
                                 <i class="fas ${icon}"></i>
                             </button>
                         </div>`;
@@ -831,7 +917,7 @@
                                 <i class="fas ${isUnmuted ? 'fa-volume-up' : 'fa-volume-mute'}"></i>
                             </button>
                             <button class="action-btn ${btnClass}" title="${title}"
-                                    onclick="confirmRemove('${videoId}', '${slotId}')">
+                                    onclick="removeFromSlot('${videoId}', '${slotId}')">
                                 <i class="fas ${icon}"></i>
                             </button>
                         </div>`;
@@ -938,6 +1024,106 @@
                     tbody.innerHTML = `<tr><td colspan="4" style="padding:15px; color:red; text-align:center;">${MSG_SERVER_ERROR}</td></tr>`;
                 }
             });
+        }
+
+        document.getElementById('addStreamBtn').onclick = () => {
+            document.getElementById('addStreamModal').style.display = 'block';
+        };
+
+        async function submitAddStream() {
+            const url = document.getElementById('streamUrl').value.trim();
+            const name = document.getElementById('streamDisplayName').value.trim();
+            const mins = parseInt(document.getElementById('streamDurationMin').value) || 0;
+            const secs = parseInt(document.getElementById('streamDurationSec').value) || 0;
+            const totalSec = mins * 60 + secs;
+            const bufferSec = parseInt(document.getElementById('streamBufferRange').value) || 5;
+            const rotationEndDate = document.getElementById('streamRotationEndDate').value || '';
+            const errEl = document.getElementById('streamAddError');
+            errEl.style.display = 'none';
+            if (!url) { errEl.innerHTML = '&#1059;&#1082;&#1072;&#1078;&#1080;&#1090;&#1077; URL &#1087;&#1086;&#1090;&#1086;&#1082;&#1072;'; errEl.style.display = 'block'; return; }
+            if (totalSec < 1) { errEl.innerHTML = '&#1044;&#1083;&#1080;&#1090;&#1077;&#1083;&#1100;&#1085;&#1086;&#1089;&#1090;&#1100; &#1076;&#1086;&#1083;&#1078;&#1085;&#1072; &#1073;&#1099;&#1090;&#1100; &#1085;&#1077; &#1084;&#1077;&#1085;&#1077;&#1077; 1 &#1089;&#1077;&#1082;&#1091;&#1085;&#1076;&#1099;'; errEl.style.display = 'block'; return; }
+            const slots = [...document.querySelectorAll('#streamSlotsGrid input[name="streamSlots"]:checked')].map(c => c.value);
+            if (!slots.length) { errEl.innerHTML = '&#1042;&#1099;&#1073;&#1077;&#1088;&#1080;&#1090;&#1077; &#1093;&#1086;&#1090;&#1103; &#1073;&#1099; &#1086;&#1076;&#1080;&#1085; &#1089;&#1083;&#1086;&#1090;'; errEl.style.display = 'block'; return; }
+            const btn = document.getElementById('submitStreamBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> &#1057;&#1086;&#1093;&#1088;&#1072;&#1085;&#1103;&#1077;&#1084;...';
+            try {
+                const res = await fetch('/ads/add-stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ displayName: name || url, streamUrl: url, durationSec: totalSec, bufferSec, slots, rotationEndDate })
+                });
+                const data = await res.json();
+                if (data.success) { closeModal('addStreamModal'); location.reload(); }
+                else {
+                    errEl.innerHTML = '&#1054;&#1096;&#1080;&#1073;&#1082;&#1072;: ' + (data.error || '&#1053;&#1077;&#1080;&#1079;&#1074;&#1077;&#1089;&#1090;&#1085;&#1072;&#1103; &#1086;&#1096;&#1080;&#1073;&#1082;&#1072;');
+                    errEl.style.display = 'block';
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-plus-circle"></i> &#1044;&#1086;&#1073;&#1072;&#1074;&#1080;&#1090;&#1100; &#1087;&#1086;&#1090;&#1086;&#1082;';
+                }
+            } catch (e) {
+                errEl.innerHTML = '&#1054;&#1096;&#1080;&#1073;&#1082;&#1072; &#1089;&#1077;&#1090;&#1080;';
+                errEl.style.display = 'block';
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-plus-circle"></i> &#1044;&#1086;&#1073;&#1072;&#1074;&#1080;&#1090;&#1100; &#1087;&#1086;&#1090;&#1086;&#1082;';
+            }
+        }
+
+        function openEditExpiry(videoId, currentDate) {
+            document.getElementById('editExpiryVideoId').value = videoId;
+            document.getElementById('editExpiryDate').value = currentDate || '';
+            document.getElementById('editExpiryError').style.display = 'none';
+            document.getElementById('editExpiryModal').style.display = 'block';
+        }
+
+        function clearExpiryDate() {
+            document.getElementById('editExpiryDate').value = '';
+            saveExpiryDate();
+        }
+
+        async function saveExpiryDate() {
+            const videoId = document.getElementById('editExpiryVideoId').value;
+            const rotationEndDate = document.getElementById('editExpiryDate').value || null;
+            const errEl = document.getElementById('editExpiryError');
+            const btn = document.getElementById('saveExpiryBtn');
+            errEl.style.display = 'none';
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Сохраняем...';
+            try {
+                const res = await fetch('/ads/set-rotation-end', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ videoId, rotationEndDate })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    closeModal('editExpiryModal');
+                    // Update the cell in the table
+                    const el = document.getElementById(`end-date-${videoId}`);
+                    if (el) {
+                        if (data.rotationEndDate) {
+                            const d = new Date(data.rotationEndDate + 'T00:00:00');
+                            const today = new Date(); today.setHours(0,0,0,0);
+                            const expired = d < today;
+                            el.textContent = (expired ? '⚠ ' : '') + d.toLocaleDateString(typeof lang !== 'undefined' && lang === 'ru' ? 'ru-RU' : 'en-US');
+                            el.style.color = expired ? '#c00' : '#333';
+                            el.style.fontWeight = expired ? 'bold' : 'normal';
+                        } else {
+                            el.textContent = '∞';
+                            el.style.color = '#aaa';
+                            el.style.fontWeight = 'normal';
+                        }
+                    }
+                } else {
+                    errEl.textContent = 'Ошибка: ' + (data.error || 'Неизвестная ошибка');
+                    errEl.style.display = 'block';
+                }
+            } catch (e) {
+                errEl.textContent = 'Ошибка сети';
+                errEl.style.display = 'block';
+            }
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-save"></i> Сохранить';
         }
     </script>
 </body>

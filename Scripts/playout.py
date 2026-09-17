@@ -113,6 +113,27 @@ def probe_file_info(filepath):
     _PROBE_CACHE[filepath] = (duration, has_audio)
     return duration, has_audio
 
+def probe_stream_has_audio(stream_url):
+    """Quick check if an RTSP/HTTP stream has an audio track."""
+    try:
+        cmd = [
+            'ffprobe', '-v', 'quiet',
+            '-rtsp_transport', 'tcp',
+            '-show_entries', 'stream=codec_type',
+            '-of', 'json',
+            '-read_intervals', '%+5',
+            stream_url
+        ]
+        probe = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if probe.returncode == 0 and probe.stdout.strip():
+            data = json.loads(probe.stdout)
+            for s in data.get('streams', []):
+                if s.get('codec_type') == 'audio':
+                    return True
+    except Exception as e:
+        logging.warning(f"probe_stream_has_audio({stream_url}): {e}")
+    return False
+
 class PlayoutSender:
     def __init__(self):
         self.conn = None
@@ -212,18 +233,26 @@ class PlayoutSender:
         cursor = self.get_db_cursor()
         
         # Find what SHOULD be playing right now, excluding the one we just finished
+        common_cols = """gp.id, gp.video_id, gp.start_time, gp.duration, gp.filename, gp.entry_type, gp.unmuted,
+                IFNULL(ts.exclude_from_stats, 0) as exclude_from_stats,
+                IFNULL(av.source_type, 'file') as source_type,
+                av.stream_url,
+                IFNULL(av.stream_buffer_sec, 5) as stream_buffer_sec"""
+
         if self.last_played_id:
-            query_current = """SELECT gp.id, gp.video_id, gp.start_time, gp.duration, gp.filename, gp.entry_type, gp.unmuted, IFNULL(ts.exclude_from_stats, 0) as exclude_from_stats
+            query_current = f"""SELECT {common_cols}
                 FROM generated_playlists gp
                 LEFT JOIN time_slots ts ON gp.slot_id = ts.id
+                LEFT JOIN ad_videos av ON gp.video_id = av.id
                 WHERE gp.start_time <= %s AND DATE_ADD(gp.start_time, INTERVAL gp.duration/1000 SECOND) > %s 
                 AND gp.id != %s AND gp.channel_id = %s
                 ORDER BY gp.start_time DESC LIMIT 1"""
             cursor.execute(query_current, (current_time, current_time, self.last_played_id, CHANNEL_ID))
         else:
-            query_current = """SELECT gp.id, gp.video_id, gp.start_time, gp.duration, gp.filename, gp.entry_type, gp.unmuted, IFNULL(ts.exclude_from_stats, 0) as exclude_from_stats
+            query_current = f"""SELECT {common_cols}
                 FROM generated_playlists gp
                 LEFT JOIN time_slots ts ON gp.slot_id = ts.id
+                LEFT JOIN ad_videos av ON gp.video_id = av.id
                 WHERE gp.start_time <= %s AND DATE_ADD(gp.start_time, INTERVAL gp.duration/1000 SECOND) > %s 
                 AND gp.channel_id = %s
                 ORDER BY gp.start_time DESC LIMIT 1"""
@@ -236,9 +265,10 @@ class PlayoutSender:
             return current, "current"
         
         # Nothing playing right now — find the next scheduled item
-        query_next = """SELECT gp.id, gp.video_id, gp.start_time, gp.duration, gp.filename, gp.entry_type, gp.unmuted, IFNULL(ts.exclude_from_stats, 0) as exclude_from_stats
+        query_next = f"""SELECT {common_cols}
             FROM generated_playlists gp
             LEFT JOIN time_slots ts ON gp.slot_id = ts.id
+            LEFT JOIN ad_videos av ON gp.video_id = av.id
             WHERE gp.start_time > %s AND gp.channel_id = %s ORDER BY gp.start_time ASC LIMIT 1"""
         cursor.execute(query_next, (current_time, CHANNEL_ID))
         nxt = cursor.fetchone()
@@ -320,6 +350,146 @@ class PlayoutSender:
         
         thread = threading.Thread(target=_regen, daemon=True)
         thread.start()
+
+    def stream_rtsp(self, stream_url, duration_limit, video_id=None, exclude_from_stats=False, is_unmuted=False, buffer_sec=5):
+        """Pull an RTSP/HTTP live stream and feed it to the playout FIFO for the given duration.
+        
+        buffer_sec: seconds of pre-roll buffering before data starts to flow to FIFO.
+                    Eliminates startup glitches at the cost of that delay.
+        """
+        logging.info(f"[Stream] Starting RTSP pull: {stream_url} (dur={duration_limit:.1f}s, buffer={buffer_sec}s)")
+        self.log_playback_start(video_id, exclude=exclude_from_stats)
+        stream_start = time.monotonic()
+
+        # Check if stream has audio (for mute decision)
+        has_audio = probe_stream_has_audio(stream_url)
+        
+        vf = "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,fps=25,format=yuv420p"
+        bitrate_k = int(os.environ.get('FFMPEG_BITRATE_K', 5000))
+        v_bitrate = int(bitrate_k * 0.94)
+        vf_sync = "setpts=PTS-STARTPTS"
+        af_sync = "asetpts=PTS-STARTPTS,aresample=48000:async=1"
+
+        cmd = [
+            'ffmpeg',
+            '-fflags', '+igndts+discardcorrupt+genpts',
+            '-rtsp_transport', 'tcp',
+            # Buffer the incoming stream to smooth startup
+            '-thread_queue_size', '4096',
+            '-analyzeduration', f'{buffer_sec * 1000000}',  # microseconds
+            '-probesize', '10000000',
+            '-timeout', '5000000',
+            '-i', stream_url
+        ]
+
+        if not has_audio or not is_unmuted:
+            cmd += ['-re', '-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000']
+            cmd += ['-map', '0:v:0', '-map', '1:a:0']
+        else:
+            cmd += ['-map', '0:v:0', '-map', '0:a:0']
+
+        cmd += [
+            '-filter:v', f"{vf},{vf_sync}",
+            '-c:v', 'libx264', '-preset', 'ultrafast', '-b:v', f'{v_bitrate}k',
+            '-maxrate', f'{v_bitrate}k', '-bufsize', f'{bitrate_k * 2}k',
+            '-bf', '0', '-vsync', 'cfr',
+            '-g', '50', '-keyint_min', '50', '-sc_threshold', '0',
+            '-r', '25', '-profile:v', 'high', '-level', '4.1',
+            '-c:a', 'aac', '-b:a', '192k', '-ac', '2', '-ar', '48000',
+            '-af', af_sync,
+            '-max_interleave_delta', '0',
+            '-shortest',
+            '-max_delay', '500000',
+            '-flags', '+global_header',
+            '-metadata', f'title=feeder_ch{CHANNEL_ID}',
+            '-output_ts_offset', f"{self.ts_offset:.3f}",
+            '-t', f"{duration_limit:.3f}",
+            '-f', 'mpegts',
+            'pipe:1'
+        ]
+
+        log_file = None
+        try:
+            channel_id = os.environ.get('CHANNEL_ID', '1')
+            log_path = f'/dev/shm/ch{channel_id}_stream.log'
+            log_file = open(log_path, 'w')
+            try: os.chmod(log_path, 0o666)
+            except: pass
+
+            self.process = subprocess.Popen(
+                cmd,
+                preexec_fn=os.setpgrp,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=log_file,
+                bufsize=10**6
+            )
+
+            bytes_written = 0
+            last_check_time = time.monotonic()
+            while True:
+                if self.writer_error:
+                    raise self.writer_error
+
+                chunk = self.process.stdout.read(20480)
+                if not chunk:
+                    break
+                self.q.put(chunk)
+                bytes_written += len(chunk)
+
+                if time.monotonic() - last_check_time > 2.0:
+                    last_check_time = time.monotonic()
+                    if os.path.exists(SIGNAL_FILE):
+                        try: os.remove(SIGNAL_FILE)
+                        except: pass
+                        logging.warning(f"[HotReload][Stream] Interrupting stream {stream_url}")
+                        self.reconnect_db()
+                        self.last_played_id = None
+                        self._interrupted_by_hotreload = True
+                        break
+
+            return True
+        except Exception as e:
+            self._master_crashed = True
+            wall_elapsed_at_crash = time.monotonic() - stream_start
+            self.ts_offset += wall_elapsed_at_crash
+            self.stream_start_time = datetime.now() - timedelta(seconds=self.ts_offset)
+            self.clear_queue()
+            logging.error(f"[Stream] Error: {e} — advancing ts_offset by {wall_elapsed_at_crash:.1f}s.")
+            time.sleep(2)
+            try: self.fifo_handle.close()
+            except: pass
+            self.fifo_handle = open(FIFO_PATH, 'wb')
+            return False
+        finally:
+            wall_elapsed = time.monotonic() - stream_start
+            ret = -1
+            if self.process:
+                ret = self.process.poll()
+                if ret is None:
+                    try:
+                        os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
+                        self.process.wait(timeout=5)
+                    except:
+                        try: self.process.kill()
+                        except: pass
+                ret = self.process.wait()
+                self.process = None
+            if log_file:
+                try: log_file.close()
+                except: pass
+
+            if not getattr(self, '_master_crashed', False):
+                if getattr(self, '_interrupted_by_hotreload', False):
+                    self.ts_offset += wall_elapsed
+                    self.stream_start_time = datetime.now() - timedelta(seconds=self.ts_offset)
+                    self._interrupted_by_hotreload = False
+                else:
+                    self.ts_offset += wall_elapsed
+            else:
+                self._master_crashed = False
+
+            logging.info(f"[Stream] Done: {stream_url}, {bytes_written // 1024}KB, elapsed={wall_elapsed:.1f}s, next_offset={self.ts_offset:.3f}s")
 
     def stream_file(self, filename, seek_seconds=0.0, duration_limit=None, video_id=None, exclude_from_stats=False, is_filler=False, is_unmuted=False):
         # Resolve path: handle both absolute (filler) and relative (ads)
@@ -555,15 +725,35 @@ class PlayoutSender:
                     self.last_played_id = item['id']
                     continue
                 is_unmuted = bool(item.get('unmuted', 0))
-                result = self.stream_file(item['filename'], seek_seconds=seek, duration_limit=remaining, video_id=item['video_id'], exclude_from_stats=item.get('exclude_from_stats', False), is_unmuted=is_unmuted)
-                self.last_played_id = item['id']
-                if result == 'missing':
+                source_type = item.get('source_type', 'file')
+                if source_type == 'stream' and item.get('stream_url'):
+                    result = self.stream_rtsp(
+                        item['stream_url'],
+                        duration_limit=remaining,
+                        video_id=item['video_id'],
+                        exclude_from_stats=item.get('exclude_from_stats', False),
+                        is_unmuted=is_unmuted,
+                        buffer_sec=int(item.get('stream_buffer_sec', 5))
+                    )
+                else:
+                    result = self.stream_file(item['filename'], seek_seconds=seek, duration_limit=remaining, video_id=item['video_id'], exclude_from_stats=item.get('exclude_from_stats', False), is_unmuted=is_unmuted)
+                
+                if result is True:
+                    self.last_played_id = item['id']
+                elif result == 'missing':
+                    self.last_played_id = item['id']
                     # Advance past the missing slot so we don't loop on it forever.
                     skip_s = max(remaining, 1.0)
                     logging.warning(f"[Missing] Skipping current item '{item['filename']}', advancing virtual clock by {skip_s:.1f}s.")
                     self.ts_offset += skip_s
                     time.sleep(0.5)
                     self.regenerate_playlist()
+                else:
+                    # result == False (crashed/disconnected)
+                    # We do NOT set last_played_id, so it will be retried in the next loop iteration.
+                    # Sleep a bit to avoid tight looping on a dead camera/process.
+                    logging.warning(f"[Retry] Process crashed or disconnected. Retrying item '{item.get('filename', 'stream')}'...")
+                    time.sleep(1.0)
             elif status == "next":
                 if item:
                     wait = (item['start_time'] - current_stream_time).total_seconds()

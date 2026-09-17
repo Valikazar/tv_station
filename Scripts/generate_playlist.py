@@ -76,19 +76,37 @@ def generate_playlist(target_date_str=None):
     CHANNEL_FALLBACK_FILE = main_settings['fallback_path'] if main_settings and main_settings['fallback_path'] else FALLBACK_FILE
 
     # 2. Fetch Ad Videos for this specific channel
-    cursor.execute("SELECT id, filename, duration, target_slots_ids, unmuted_slots_ids FROM ad_videos WHERE duration > 0 AND channel_id = %s", (CHANNEL_ID,))
+    cursor.execute("SELECT id, filename, duration, target_slots_ids, unmuted_slots_ids, source_type, stream_url, rotation_end_date FROM ad_videos WHERE duration > 0 AND channel_id = %s", (CHANNEL_ID,))
     all_videos = cursor.fetchall()
-    
-    # Filter out videos whose files don't exist on disk
+
+    # Filter out file-backed videos whose files don't exist on disk.
+    # Stream entries (source_type='stream') are always included regardless of filesystem.
+    # Also filter out videos that are expired (rotation_end_date < target_date).
     MEDIA_DIR = os.environ.get('MEDIA_DIR', '/media/new_ads/')
     videos = []
     for v in all_videos:
-        fpath = os.path.join(MEDIA_DIR, v['filename'])
-        if os.path.exists(fpath):
-            videos.append(v)
+        # Skip expired videos
+        end_date = v.get('rotation_end_date')
+        if end_date is not None:
+            if isinstance(end_date, str):
+                try:
+                    end_date = datetime.strptime(end_date, "%Y-%m-%d").date()
+                except ValueError:
+                    end_date = None
+            if end_date is not None and end_date < target_date:
+                logging.info(f"Skipping expired video id={v['id']} (rotation_end_date={end_date})")
+                continue
+
+        src_type = v.get('source_type', 'file') or 'file'
+        if src_type == 'stream':
+            videos.append(v)  # Streams have no local file
         else:
-            logging.warning(f"Excluding video id={v['id']} ({v['filename']}): file not found at {fpath}")
-    
+            fpath = os.path.join(MEDIA_DIR, v['filename'])
+            if os.path.exists(fpath):
+                videos.append(v)
+            else:
+                logging.warning(f"Excluding video id={v['id']} ({v['filename']}): file not found at {fpath}")
+
     logging.info(f"Videos available: {len(videos)} of {len(all_videos)} (excluded {len(all_videos) - len(videos)} missing)")
 
     def get_videos_for_slot(slot_id):

@@ -23,10 +23,12 @@ def log(msg):
     print(msg, flush=True)
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-AGENT_VERSION   = "2.1.11"               # Auto-incremented by deploy.ps1
+AGENT_VERSION   = "2.1.17"               # Auto-incremented by deploy.ps1
 BEACON_URL      = "udp://226.0.0.1:5004"   # Fixed well-known beacon multicast address
 MPV_SOCKET      = "/tmp/mpvsocket"          # MPV IPC socket path
 REPORT_INTERVAL = 10                     # seconds between status reports
+HTTP_TIMEOUT    = (3, 7)                 # (connect_timeout, read_timeout) in seconds
+SESSION_MAX_AGE = 300                    # recreate HTTP session every 5 minutes to prevent CLOSE-WAIT leaks
 
 # ── State (in-memory only) ─────────────────────────────────────────────────────
 _last_traffic_time  = 0
@@ -39,7 +41,42 @@ _last_frame_count   = -1                 # Track rendered frames to detect freez
 _stall_count        = 0                  # Number of consecutive stall detections
 _ipc_fail_count     = 0                  # Number of consecutive IPC failures
 _last_hdmi_status   = None               # Tracks physical HDMI connection state
+_http_session       = None               # Managed requests.Session
+_session_created_at = 0.0                # Timestamp of last session creation
 _stream_load_time   = 0.0                # Tracks wall time when the stream was last loaded
+_udp_errors_history = []                 # list of (timestamp, error_count) to track last hour drops
+
+# ── HTTP Session Management ────────────────────────────────────────────────────
+def _get_session() -> requests.Session:
+    """Returns a managed HTTP session, recreating it if stale to prevent CLOSE-WAIT leaks."""
+    global _http_session, _session_created_at
+    now = time.time()
+    if _http_session is None or (now - _session_created_at) > SESSION_MAX_AGE:
+        if _http_session is not None:
+            try: _http_session.close()
+            except: pass
+        _http_session = requests.Session()
+        # Disable keep-alive retries — we'd rather fail fast and reconnect clean
+        adapter = requests.adapters.HTTPAdapter(
+            max_retries=0,
+            pool_connections=1,
+            pool_maxsize=1
+        )
+        _http_session.mount('http://', adapter)
+        _http_session.mount('https://', adapter)
+        _session_created_at = now
+        log("[HTTP] New session created")
+    return _http_session
+
+def _reset_session():
+    """Force-closes and discards the current HTTP session (call on network errors)."""
+    global _http_session, _session_created_at
+    if _http_session is not None:
+        try: _http_session.close()
+        except: pass
+        _http_session = None
+        _session_created_at = 0.0
+        log("[HTTP] Session reset due to error")
 
 # ── Identity ───────────────────────────────────────────────────────────────────
 def get_receiver_id() -> str:
@@ -270,7 +307,7 @@ def send_logs(server_url: str, receiver_id: str, hostname: str):
             "hostname": hostname,
             "logs": full_logs
         }
-        requests.post(f"{server_url}/api/receivers/logs", json=payload, timeout=10)
+        _get_session().post(f"{server_url}/api/receivers/logs", json=payload, timeout=HTTP_TIMEOUT)
         log("[Agent] Logs successfully sent to server.")
     except Exception as e:
         log(f"[Agent] Failed to send logs: {e}")
@@ -307,37 +344,374 @@ def get_system_uptime() -> float:
     except Exception:
         return 0.0
 
+def get_mpv_uptime() -> float:
+    """Gets the uptime of the MPV process in seconds."""
+    try:
+        pid_bytes = subprocess.run(["pgrep", "-x", "mpv"], capture_output=True)
+        pid_str = pid_bytes.stdout.decode().strip()
+        if not pid_str:
+            return 0.0
+        pid = pid_str.split()[0]
+        with open(f"/proc/{pid}/stat", "r") as f:
+            stat_parts = f.read().split()
+        starttime_ticks = float(stat_parts[21])
+        ticks_per_sec = os.sysconf(os.sysconf_names['SC_CLK_TCK'])
+        with open("/proc/uptime", "r") as f:
+            sys_uptime = float(f.readline().split()[0])
+        mpv_uptime = sys_uptime - (starttime_ticks / ticks_per_sec)
+        return max(0.0, mpv_uptime)
+    except Exception:
+        return 0.0
+
+def check_cec_tv_power(connector_name: str) -> str | None:
+    """
+    Queries the TV via CEC on the corresponding adapter.
+    Returns:
+      - "connected" if the TV is confirmed to be turned ON.
+      - "disconnected" if the TV is confirmed to be turned OFF / Standby.
+      - None if CEC is inactive, unsupported, or adapter cannot be probed.
+
+    NOTE: We rely ONLY on GIVE_DEVICE_POWER_STATUS (mandatory CEC spec).
+    GIVE_OSD_NAME is optional and many TVs (LG, Sony, etc.) return Rx,Timeout
+    even when fully ON — do NOT use it for power state detection.
+    """
+    try:
+        # Map HDMI-A-1 -> /dev/cec0, HDMI-A-2 -> /dev/cec1
+        if "HDMI-A-1" in connector_name:
+            cec_dev = "/dev/cec0"
+        elif "HDMI-A-2" in connector_name:
+            cec_dev = "/dev/cec1"
+        else:
+            return None
+            
+        if not os.path.exists(cec_dev):
+            return None
+            
+        # Ensure CEC adapter is configured as Playback device (fast, no-op if already done)
+        subprocess.run(["sudo", "-n", "cec-ctl", "-d", cec_dev, "--playback"], 
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2)
+                        
+        # Query power status — mandatory CEC spec, all compliant TVs support this
+        # --timeout 1200 means 1.2s max wait for reply
+        res = subprocess.run(
+            ["sudo", "-n", "cec-ctl", "-d", cec_dev, "--to", "0", "--give-device-power-status", "--timeout", "1200"],
+            capture_output=True, text=True, timeout=3
+        )
+        
+        if res.returncode != 0 or "REPORT_POWER_STATUS" not in res.stdout:
+            # TV did not reply at all -> CEC not active or TV physically disconnected
+            return None
+            
+        stdout = res.stdout
+        if "pwr-state: standby" in stdout or "pwr-state: to-standby" in stdout:
+            log(f"[CEC] TV on {cec_dev} reports standby/off")
+            return "disconnected"
+            
+        if "pwr-state: on" in stdout or "pwr-state: to-on" in stdout:
+            # Query vendor ID to verify if the TV is truly ON or in QuickStart+ standby mode (LG/other TVs).
+            # If the TV is in standby, the main board is asleep, and the Vendor ID query will time out.
+            vendor_res = subprocess.run(
+                ["sudo", "-n", "cec-ctl", "-d", cec_dev, "--to", "0", "--give-device-vendor-id", "--timeout", "1200"],
+                capture_output=True, text=True, timeout=3
+            )
+            vendor_stdout = vendor_res.stdout
+            if "Rx, Timeout" in vendor_stdout or "timeout" in vendor_stdout.lower():
+                log(f"[CEC] TV on {cec_dev} reports ON but Vendor ID query timed out (standby/sleep mode)")
+                return "disconnected"
+                
+            log(f"[CEC] TV on {cec_dev} confirms ON")
+            return "connected"
+            
+        # Unrecognised power state — don't override DRM result
+        return None
+    except Exception as e:
+        log(f"[CEC] Error querying TV power status: {e}")
+        return None
+
+
 def get_hdmi_status() -> str:
-    """Reads the current connection status of all physical HDMI ports."""
+    """Reads the current connection status of the active HDMI display."""
     try:
         drm_path = "/sys/class/drm"
         if not os.path.exists(drm_path):
             return "unknown"
         
-        connected_any = False
-        disconnected_any = False
-        
+        candidates = []
         for name in os.listdir(drm_path):
             if "HDMI-A" in name:
                 status_file = os.path.join(drm_path, name, "status")
+                edid_file = os.path.join(drm_path, name, "edid")
                 if os.path.exists(status_file):
                     with open(status_file, "r") as f:
                         status = f.read().strip()
-                        if status == "connected":
-                            connected_any = True
-                        elif status == "disconnected":
-                            disconnected_any = True
-                            
-        if connected_any:
-            return "connected"
-        if disconnected_any:
+                    
+                    has_edid = False
+                    if os.path.exists(edid_file):
+                        try:
+                            with open(edid_file, "rb") as edid_f:
+                                has_edid = len(edid_f.read(8)) > 0
+                        except Exception:
+                            pass
+                    
+                    connector_name = name
+                    if "-" in name:
+                        parts = name.split("-", 1)
+                        if len(parts) > 1:
+                            connector_name = parts[1]
+                    
+                    candidates.append({
+                        "name": connector_name,
+                        "status": status,
+                        "has_edid": has_edid
+                    })
+        
+        if not candidates:
+            return "unknown"
+            
+        # Prioritize candidate with a valid EDID
+        active_connector = None
+        for c in candidates:
+            if c["has_edid"]:
+                active_connector = c
+                break
+                
+        if not active_connector:
+            # If no EDID is found anywhere, return "connected" if any are connected, else "disconnected"
+            for c in candidates:
+                if c["status"] == "connected":
+                    active_connector = c
+                    break
+        
+        if not active_connector:
             return "disconnected"
-        return "unknown"
+            
+        if active_connector["status"] != "connected":
+            return "disconnected"
+            
+        # Check TV power state via CEC if active_connector is connected
+        cec_power = check_cec_tv_power(active_connector["name"])
+        if cec_power == "disconnected":
+            return "disconnected"
+            
+        return active_connector["status"]
     except Exception as e:
         log(f"[HDMI] Error reading status: {e}")
         return "unknown"
 
+def detect_active_drm_connector() -> str | None:
+    """
+    Scans DRM connectors in /sys/class/drm/ to find the best physical HDMI display.
+    Prioritizes connectors that are 'connected' AND have a non-empty EDID.
+    Falls back to the first 'connected' connector.
+    """
+    drm_path = "/sys/class/drm"
+    if not os.path.exists(drm_path):
+        return None
+        
+    candidates = [] # list of (connector_name, has_edid)
+    for name in os.listdir(drm_path):
+        if "HDMI-A" in name:
+            status_file = os.path.join(drm_path, name, "status")
+            edid_file = os.path.join(drm_path, name, "edid")
+            
+            if os.path.exists(status_file):
+                try:
+                    with open(status_file, "r") as f:
+                        status = f.read().strip()
+                    if status == "connected":
+                        has_edid = False
+                        if os.path.exists(edid_file):
+                            try:
+                                with open(edid_file, "rb") as edid_f:
+                                    has_edid = len(edid_f.read(8)) > 0
+                            except Exception:
+                                pass
+                        
+                        connector_name = name
+                        if "-" in name:
+                            parts = name.split("-", 1)
+                            if len(parts) > 1:
+                                connector_name = parts[1]
+                        
+                        candidates.append((connector_name, has_edid))
+                except Exception as e:
+                    log(f"[DRM] Error reading connector {name}: {e}")
+                    
+    if not candidates:
+        return None
+        
+    for conn, has_edid in candidates:
+        if has_edid:
+            return conn
+            
+    return candidates[0][0]
+
+def update_mpv_connector(connector: str) -> bool:
+    """Updates the drm-connector option in the user's mpv.conf if it differs. Returns True if updated."""
+    if not connector:
+        return False
+        
+    config_paths = [
+        "/home/pi/.config/mpv/mpv.conf",
+        os.path.expanduser("~/.config/mpv/mpv.conf")
+    ]
+    
+    unique_paths = []
+    for p in config_paths:
+        if p not in unique_paths and os.path.exists(p):
+            unique_paths.append(p)
+            
+    if not unique_paths:
+        config_dir = "/home/pi/.config/mpv"
+        if os.path.exists("/home/pi"):
+            os.makedirs(config_dir, exist_ok=True)
+            unique_paths = [os.path.join(config_dir, "mpv.conf")]
+            with open(unique_paths[0], "w") as f:
+                pass
+        else:
+            return False
+
+    updated_any = False
+    for p in unique_paths:
+        try:
+            with open(p, "r") as f:
+                content = f.read()
+                
+            match = re.search(r'^\s*drm-connector\s*=\s*(.+)$', content, re.MULTILINE)
+            if match:
+                current_val = match.group(1).strip()
+                if current_val == connector:
+                    continue
+                new_content = re.sub(r'^\s*drm-connector\s*=\s*.*$', f'drm-connector={connector}', content, flags=re.MULTILINE)
+            else:
+                new_content = content.rstrip() + f"\n\n# Dynamic DRM Connector auto-detected\ndrm-connector={connector}\n"
+                
+            log(f"[Agent] Updating {p} with drm-connector={connector}...")
+            with open(p, "w") as f:
+                f.write(new_content)
+                
+            if os.geteuid() == 0:
+                try:
+                    import pwd
+                    pi_uid = pwd.getpwnam('pi').pw_uid
+                    pi_gid = pwd.getpwnam('pi').pw_gid
+                    os.chown(p, pi_uid, pi_gid)
+                except Exception:
+                    pass
+            updated_any = True
+        except Exception as e:
+            log(f"[Agent] Error updating {p}: {e}")
+            
+    if updated_any:
+        log(f"[Agent] Restarting mpv-player to apply new DRM connector: {connector}...")
+        mpv_force_restart()
+        return True
+    return False
+
+def ensure_correct_connector(force_restart_on_no_change=False):
+    """Detects active connector, updates mpv.conf, and restarts MPV if needed."""
+    connector = detect_active_drm_connector()
+    if connector:
+        updated = update_mpv_connector(connector)
+        if not updated and force_restart_on_no_change:
+            log("[Agent] Connector unchanged, but forcing MPV restart anyway...")
+            mpv_force_restart()
+
 # ── Metrics ────────────────────────────────────────────────────────────────────
+
+def get_ethernet_link_speed() -> str:
+    """Reads ethernet link speed from sysfs."""
+    try:
+        for iface in ['eth0', 'end0']:
+            path = f"/sys/class/net/{iface}"
+            if os.path.exists(path):
+                operstate_file = f"{path}/operstate"
+                speed_file = f"{path}/speed"
+                if os.path.exists(operstate_file):
+                    with open(operstate_file, 'r') as f:
+                        state = f.read().strip()
+                    if state == "down":
+                        return "down"
+                if os.path.exists(speed_file):
+                    with open(speed_file, 'r') as f:
+                        speed = f.read().strip()
+                        return f"{speed} Mbps"
+        return "unknown"
+    except:
+        return "error"
+
+def get_udp_rcvbuf_errors() -> int:
+    """Reads UDP receive buffer errors from /proc/net/snmp."""
+    try:
+        if os.path.exists("/proc/net/snmp"):
+            with open("/proc/net/snmp", "r") as f:
+                for line in f:
+                    if line.startswith("Udp:"):
+                        parts = line.split()
+                        if parts[1].isdigit():
+                            if len(parts) > 5:
+                                return int(parts[5])
+        return 0
+    except:
+        return 0
+
+def get_udp_errors_last_hour() -> int:
+    """Calculates UDP drops occurred within the last 1 hour using a sliding in-memory history."""
+    global _udp_errors_history
+    try:
+        now = time.time()
+        current_errors = get_udp_rcvbuf_errors()
+        
+        # Append current measurement
+        _udp_errors_history.append((now, current_errors))
+        
+        # Remove older than 1 hour (3600 seconds)
+        _udp_errors_history = [item for item in _udp_errors_history if now - item[0] <= 3600]
+        
+        if len(_udp_errors_history) > 0:
+            oldest_time, oldest_errors = _udp_errors_history[0]
+            # Handle counter reset (e.g. reboot)
+            if current_errors < oldest_errors:
+                _udp_errors_history = [(now, current_errors)]
+                return 0
+            return current_errors - oldest_errors
+        return 0
+    except Exception as e:
+        log(f"[Metrics] UDP last hour calculation error: {e}")
+        return 0
+
+def get_ethernet_errors() -> dict:
+    """Reads physical layer errors from ethtool for eth0 or end0."""
+    out = {"fcs": 0, "align": 0, "symbol": 0}
+    try:
+        for iface in ['eth0', 'end0']:
+            path = f"/sys/class/net/{iface}"
+            if os.path.exists(path):
+                res = subprocess.run(
+                    ["sudo", "-n", "/usr/sbin/ethtool", "-S", iface],
+                    capture_output=True, text=True, timeout=5
+                )
+                if res.returncode == 0:
+                    for line in res.stdout.splitlines():
+                        line = line.strip()
+                        if not line: continue
+                        parts = line.split(":")
+                        if len(parts) == 2:
+                            key = parts[0].strip()
+                            try:
+                                val = int(parts[1].strip())
+                            except ValueError:
+                                continue
+                            if key in ['rx_fcs', 'rx_frame_check_sequence_errors']:
+                                out["fcs"] = val
+                            elif key in ['rx_align', 'rx_alignment_errors']:
+                                out["align"] = val
+                            elif key in ['rx_code', 'rx_symbol_errors']:
+                                out["symbol"] = val
+                break
+    except Exception as e:
+        log(f"[Metrics] Ethernet errors detection failed: {e}")
+    return out
 
 def get_cpu_usage() -> float:
     try:
@@ -408,13 +782,20 @@ def main():
     log(f"[Agent] Initial HDMI Status: {hdmi_status}")
     _last_hdmi_status = hdmi_status
     
-    # Boot Recovery: if system recently booted and HDMI is connected, force MPV restart
+    # Auto-detect correct DRM connector on startup
     uptime = get_system_uptime()
-    if uptime > 0 and uptime < 300 and hdmi_status == "connected":
-        log(f"[Agent] System recently booted ({uptime:.1f}s ago) with HDMI connected. Performing one-time MPV restart to ensure clean display binding...")
-        mpv_force_restart()
-        # Give MPV a moment to start up and initialize
-        time.sleep(3)
+    if hdmi_status == "connected":
+        sentinel_path = "/tmp/.agent_boot_restart_done"
+        force_restart = (uptime > 0 and uptime < 300) and not os.path.exists(sentinel_path)
+        if force_restart:
+            try:
+                with open(sentinel_path, "w") as f:
+                    f.write("1")
+            except Exception:
+                pass
+        ensure_correct_connector(force_restart_on_no_change=force_restart)
+        if force_restart:
+            time.sleep(3)
 
     # ── Phase 0: System Tuning (Reliability) ──────────────────────────────────
     # Execute the tuning script if it exists to ensure network/OS settings are applied
@@ -468,7 +849,7 @@ def main():
     while _current_stream_url is None:
         try:
             config_url = f"{_server_url}/api/receivers/config"
-            resp = requests.get(config_url, params={"id": receiver_id, "hostname": hostname}, timeout=5)
+            resp = _get_session().get(config_url, params={"id": receiver_id, "hostname": hostname}, timeout=HTTP_TIMEOUT)
             data = resp.json()
             _current_stream_url = data.get("stream_url")
             log(f"[Agent] Config received: {_current_stream_url}")
@@ -487,8 +868,8 @@ def main():
             # 0. HDMI HOTPLUG DETECTION AND RECOVERY
             current_hdmi = get_hdmi_status()
             if _last_hdmi_status == "disconnected" and current_hdmi == "connected":
-                log("[HDMI] Hotplug detected! HDMI changed from disconnected to connected. Restarting MPV to re-initialize physical display...")
-                mpv_force_restart()
+                log("[HDMI] Hotplug detected! HDMI changed from disconnected to connected. Re-detecting connector and restarting MPV...")
+                ensure_correct_connector(force_restart_on_no_change=True)
                 _last_hdmi_status = current_hdmi
                 time.sleep(REPORT_INTERVAL)
                 continue
@@ -504,7 +885,8 @@ def main():
                 "pause",
                 "volume",
                 "vo-configured",
-                "current-vo"
+                "current-vo",
+                "demuxer-cache-duration"
             ])
             
             playing = props.get("path")
@@ -534,8 +916,8 @@ def main():
                 # Wait 15 seconds after loading the stream to allow MPV connection to establish
                 if (time.time() - _stream_load_time) > 15:
                     if current_hdmi != "disconnected" and (vo_configured == False or not current_vo):
-                        log(f"[HDMI] Screen is active but MPV display binding failed (vo-configured: {vo_configured}, vo: {current_vo}). Forcing MPV restart to re-bind...")
-                        mpv_force_restart()
+                        log(f"[HDMI] Screen is active but MPV display binding failed (vo-configured: {vo_configured}, vo: {current_vo}). Re-detecting connector and restarting MPV...")
+                        ensure_correct_connector(force_restart_on_no_change=True)
                         time.sleep(REPORT_INTERVAL)
                         continue
 
@@ -603,6 +985,12 @@ def main():
             # Use the most accurate info for the report
             report_playing = playing or _current_stream_url
 
+            # Determine active connector to report in hdmi_status if connected
+            connector = detect_active_drm_connector()
+            hdmi_val = connector if current_hdmi == "connected" and connector else current_hdmi
+
+            eth_errs = get_ethernet_errors()
+
             payload = {
                 "id":                 receiver_id,
                 "hostname":           hostname,
@@ -614,11 +1002,20 @@ def main():
                 "current_source_ip":  "Detected",
                 "current_stream_url": report_playing,
                 "actual_volume":      props.get("volume"),
+                "link_speed":         get_ethernet_link_speed(),
+                "udp_errors":         get_udp_rcvbuf_errors(),
+                "udp_errors_1h":      get_udp_errors_last_hour(),
+                "mpv_cache_duration": props.get("demuxer-cache-duration"),
+                "hdmi_status":        hdmi_val,
+                "mpv_uptime":         int(get_mpv_uptime()),
+                "eth_fcs_errors":     eth_errs["fcs"],
+                "eth_align_errors":   eth_errs["align"],
+                "eth_symbol_errors":  eth_errs["symbol"],
             }
 
             try:
                 report_url = f"{_server_url}/api/receivers/report"
-                response   = requests.post(report_url, json=payload, timeout=5)
+                response   = _get_session().post(report_url, json=payload, timeout=HTTP_TIMEOUT)
                 data       = response.json()
 
                 # Handle switch command from server
@@ -644,7 +1041,8 @@ def main():
                     mpv_send(["set_property", "volume", server_vol])
 
             except (requests.exceptions.RequestException, ValueError) as e:
-                print(f"[Agent] Report failed: {e}. Re-discovering server...")
+                print(f"[Agent] Report failed: {e}. Resetting HTTP session and re-discovering server...")
+                _reset_session()
                 new_server = discover_server()
                 if new_server:
                     _server_url = new_server

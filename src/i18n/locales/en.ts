@@ -231,7 +231,7 @@ const en = {
     receivers_th_volume: 'Vol',
     receivers_th_cpu: 'CPU',
     receivers_th_temp: 'Temp',
-    receivers_th_traffic: 'Bitrate (Plan/Actual)',
+    receivers_th_traffic: 'Bitrate (Actual/Plan)',
     receivers_th_playing: 'Channel',
     receivers_th_source: 'Source IP',
     receivers_th_last_seen: 'Last Seen',
@@ -253,6 +253,12 @@ const en = {
     receivers_btn_reboot: 'Reboot Device',
     receivers_js_reboot_confirm: 'Are you sure you want to reboot this receiver?',
     receivers_js_reboot_queued: 'Reboot command queued',
+    receivers_th_link_speed: 'Link Speed',
+    receivers_th_udp_errors: 'UDP Drops (1h/Total)',
+    receivers_th_mpv_cache: 'Buffer',
+    receivers_th_hdmi: 'HDMI',
+    receivers_th_mpv_uptime: 'MPV Uptime',
+    receivers_th_eth_errors: 'Eth Errors (FCS/Align/Code)',
 };
 
 export default en;
