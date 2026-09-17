@@ -17,6 +17,9 @@ pool.query(`ALTER TABLE ad_videos ADD COLUMN source_type VARCHAR(16) NOT NULL DE
 pool.query(`ALTER TABLE ad_videos ADD COLUMN stream_url VARCHAR(512) DEFAULT NULL`).catch(() => {});
 pool.query(`ALTER TABLE ad_videos ADD COLUMN stream_buffer_sec INT NOT NULL DEFAULT 5`).catch(() => {});
 pool.query(`ALTER TABLE ad_videos ADD COLUMN rotation_end_date DATE DEFAULT NULL`).catch(() => {});
+pool.query(`ALTER TABLE ad_videos ADD COLUMN is_duplicate TINYINT(1) NOT NULL DEFAULT 0`).catch(() => {});
+pool.query(`ALTER TABLE ad_videos ADD COLUMN original_video_id INT DEFAULT NULL`).catch(() => {});
+pool.query(`ALTER TABLE ad_videos ADD COLUMN sort_order INT NOT NULL DEFAULT 0`).catch(() => {});
 
 const execAsync = promisify(exec);
 const router = express.Router();
@@ -67,7 +70,7 @@ const NEW_ADS_PATH = path.join(path.dirname(ADS_BASE_PATH), 'new_ads');
 router.get('/', async (req: Request, res: Response) => {
     try {
         const channelId = req.session.currentChannelId || 1;
-        const [rows] = await pool.execute<RowDataPacket[]>('SELECT * FROM ad_videos WHERE channel_id = ? ORDER BY created_at DESC', [channelId]);
+        const [rows] = await pool.execute<RowDataPacket[]>('SELECT * FROM ad_videos WHERE channel_id = ? ORDER BY sort_order ASC, id ASC', [channelId]);
         const showArchived = req.query.showArchived === 'true';
         const allAdSlots = getAdSlots(channelId);
 
@@ -218,15 +221,22 @@ router.post('/add-to-slot', async (req: Request, res: Response) => {
         if (rows.length === 0) return res.status(404).send('Video not found');
 
         const video = rows[0];
-        let slots = typeof video.target_slots_ids === 'string' ? JSON.parse(video.target_slots_ids) : video.target_slots_ids;
+        const isDuplicate = video.is_duplicate === 1;
         const targetDbId = isNaN(Number(slotId)) ? slotId : Number(slotId);
+
+        // Duplicates cannot be placed in the archive
+        if (isDuplicate && targetDbId === ARCHIVE_SLOT) {
+            return res.status(400).send('Duplicates cannot be placed in the archive');
+        }
+
+        let slots = typeof video.target_slots_ids === 'string' ? JSON.parse(video.target_slots_ids) : video.target_slots_ids;
 
         if (slots.includes(targetDbId)) return res.status(400).send('Already in slot');
 
         if (!slots.includes(targetDbId)) {
             slots.push(targetDbId);
 
-            // If it was in archive and now added to a slot, we can remove it from archive implicitly if desired.
+            // If it was in archive and now added to a slot, remove from archive implicitly.
             if (targetDbId !== ARCHIVE_SLOT && slots.includes(ARCHIVE_SLOT)) {
                 slots = slots.filter((s: string | number) => s !== ARCHIVE_SLOT);
             }
@@ -259,6 +269,7 @@ router.post('/remove-from-slot', async (req: Request, res: Response) => {
         if (rows.length === 0) return res.status(404).send('Video not found');
 
         const video = rows[0];
+        const isDuplicate = video.is_duplicate === 1;
         let slots = typeof video.target_slots_ids === 'string' ? JSON.parse(video.target_slots_ids) : video.target_slots_ids;
         const targetDbId = isNaN(Number(slotId)) ? slotId : Number(slotId);
 
@@ -266,18 +277,36 @@ router.post('/remove-from-slot', async (req: Request, res: Response) => {
         if (index === -1) return res.status(400).send('Not in slot');
 
         if (targetDbId === ARCHIVE_SLOT) {
-            // Permanent delete from archive (= delete from disk)
-            const filePath = path.join(NEW_ADS_PATH, video.filename);
-            if (fs.existsSync(filePath)) {
-                await fs.promises.unlink(filePath);
+            // Archive slot: for originals - delete file from disk; for duplicates - this shouldn't happen
+            if (!isDuplicate) {
+                const filePath = path.join(NEW_ADS_PATH, video.filename);
+                if (fs.existsSync(filePath)) {
+                    await fs.promises.unlink(filePath);
+                }
             }
             slots.splice(index, 1);
         } else {
             slots.splice(index, 1);
-            // If no active slots remain, move to archive
             const activeSlotsCount = slots.filter((s: string | number) => s !== ARCHIVE_SLOT).length;
-            if (activeSlotsCount === 0 && !slots.includes(ARCHIVE_SLOT)) {
-                slots.push(ARCHIVE_SLOT);
+
+            if (isDuplicate) {
+                // Duplicates: when no active slots remain, delete the DB record (never archive)
+                if (activeSlotsCount === 0) {
+                    const username = req.session?.username || 'unknown';
+                    logAction(username, 'DELETE_DUPLICATE', `duplicate video ID ${videoId} removed from all slots - DB record deleted`);
+                    await pool.execute('DELETE FROM ad_videos WHERE id = ?', [videoId]);
+                    // Get updated slot count
+                    const [countRows] = await pool.execute<RowDataPacket[]>(
+                        "SELECT count(*) as count FROM ad_videos WHERE JSON_CONTAINS(target_slots_ids, ?)",
+                        [JSON.stringify(targetDbId)]
+                    );
+                    return res.json({ success: true, slots: [], slotCount: countRows[0].count, deleted: true });
+                }
+            } else {
+                // Originals: move to archive when no active slots remain
+                if (activeSlotsCount === 0 && !slots.includes(ARCHIVE_SLOT)) {
+                    slots.push(ARCHIVE_SLOT);
+                }
             }
         }
 
@@ -402,6 +431,106 @@ router.post('/set-rotation-end', async (req: Request, res: Response) => {
         res.json({ success: true, rotationEndDate: dateVal });
     } catch (err: any) {
         console.error('set-rotation-end error:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Create a duplicate of a video (virtual copy pointing to the same file)
+router.post('/duplicate', async (req: Request, res: Response) => {
+    try {
+        const { videoId } = req.body;
+        if (!videoId) return res.status(400).json({ success: false, error: 'videoId required' });
+
+        const [rows] = await pool.execute<RowDataPacket[]>('SELECT * FROM ad_videos WHERE id = ?', [videoId]);
+        if (rows.length === 0) return res.status(404).json({ success: false, error: 'Video not found' });
+
+        const original = rows[0];
+        const channelId = original.channel_id;
+
+        // Get max sort_order for this channel to place duplicate at end
+        const [maxRows] = await pool.execute<RowDataPacket[]>(
+            'SELECT MAX(sort_order) as maxOrder FROM ad_videos WHERE channel_id = ?',
+            [channelId]
+        );
+        const newSortOrder = (maxRows[0].maxOrder ?? 0) + 1;
+
+        const dupName = `${original.display_name} (копия)`;
+
+        const [result] = await pool.execute<any>(
+            `INSERT INTO ad_videos 
+             (filename, display_name, target_slots_ids, unmuted_slots_ids, duration, channel_id, source_type, stream_url, stream_buffer_sec, rotation_end_date, is_duplicate, original_video_id, sort_order)
+             VALUES (?, ?, '[]', '[]', ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+            [
+                original.filename,
+                dupName,
+                original.duration,
+                channelId,
+                original.source_type || 'file',
+                original.stream_url || null,
+                original.stream_buffer_sec || 5,
+                original.rotation_end_date || null,
+                videoId,
+                newSortOrder
+            ]
+        );
+
+        const username = req.session?.username || 'unknown';
+        logAction(username, 'DUPLICATE', `video ID ${videoId} -> new duplicate ID ${result.insertId} "${dupName}"`);
+
+        res.json({ success: true, newId: result.insertId, displayName: dupName });
+    } catch (err: any) {
+        console.error('Duplicate error:', err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Reorder: swap sort_order of a video with its neighbor (up or down)
+router.post('/reorder', async (req: Request, res: Response) => {
+    try {
+        const { videoId, direction } = req.body;
+        if (!videoId || !direction) return res.status(400).json({ success: false, error: 'videoId and direction required' });
+
+        const [rows] = await pool.execute<RowDataPacket[]>('SELECT id, sort_order, channel_id FROM ad_videos WHERE id = ?', [videoId]);
+        if (rows.length === 0) return res.status(404).json({ success: false, error: 'Video not found' });
+
+        const current = rows[0];
+        const channelId = current.channel_id;
+        const currentOrder = current.sort_order;
+
+        let neighborRows: RowDataPacket[];
+        if (direction === 'up') {
+            // Find the row with the largest sort_order that is still less than current
+            const [nRows] = await pool.execute<RowDataPacket[]>(
+                'SELECT id, sort_order FROM ad_videos WHERE channel_id = ? AND sort_order < ? ORDER BY sort_order DESC LIMIT 1',
+                [channelId, currentOrder]
+            );
+            neighborRows = nRows;
+        } else {
+            // Find the row with the smallest sort_order that is still greater than current
+            const [nRows] = await pool.execute<RowDataPacket[]>(
+                'SELECT id, sort_order FROM ad_videos WHERE channel_id = ? AND sort_order > ? ORDER BY sort_order ASC LIMIT 1',
+                [channelId, currentOrder]
+            );
+            neighborRows = nRows;
+        }
+
+        if (neighborRows.length === 0) {
+            // Already at boundary — fix sort_order gaps and return
+            return res.json({ success: true, alreadyAtEdge: true });
+        }
+
+        const neighbor = neighborRows[0];
+
+        // Swap sort_order values
+        await pool.execute('UPDATE ad_videos SET sort_order = ? WHERE id = ?', [neighbor.sort_order, videoId]);
+        await pool.execute('UPDATE ad_videos SET sort_order = ? WHERE id = ?', [currentOrder, neighbor.id]);
+
+        const username = req.session?.username || 'unknown';
+        logAction(username, 'REORDER', `video ID ${videoId} moved ${direction}`);
+
+        res.json({ success: true });
+    } catch (err: any) {
+        console.error('Reorder error:', err);
         res.status(500).json({ success: false, error: err.message });
     }
 });

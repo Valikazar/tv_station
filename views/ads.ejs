@@ -234,6 +234,71 @@
         }
         .lang-switcher .lang-btn.active { background:rgba(255,255,255,0.2) !important; font-weight:bold; border-color:rgba(255,255,255,0.6); }
         .lang-switcher .lang-btn:hover { background:rgba(255,255,255,0.1) !important; }
+
+        /* Duplicate row highlighting */
+        tr.duplicate-row > td.text-left {
+            background-color: #f4eeff !important;
+        }
+        tr.duplicate-row:hover > td.text-left {
+            background-color: #ece0ff !important;
+        }
+        tr.duplicate-row {
+            background-color: rgba(111, 66, 193, 0.05);
+        }
+        .duplicate-badge {
+            display: inline-block;
+            font-size: 10px;
+            color: #6f42c1;
+            background: rgba(111, 66, 193, 0.12);
+            border: 1px solid rgba(111, 66, 193, 0.3);
+            border-radius: 3px;
+            padding: 1px 5px;
+            margin-top: 2px;
+            font-weight: 600;
+        }
+
+        /* Row move buttons */
+        .btn-move {
+            padding: 2px 5px;
+            border-radius: 3px;
+            border: 1px solid #ccc;
+            background: #f8f9fa;
+            color: #555;
+            cursor: pointer;
+            font-size: 11px;
+            line-height: 1.2;
+            transition: all 0.15s;
+        }
+        .btn-move:hover {
+            background: #6c757d;
+            color: #fff;
+            border-color: #6c757d;
+        }
+        .row-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            float: left;
+            margin-right: 6px;
+        }
+
+        /* Duplicate button */
+        .btn-duplicate {
+            padding: 2px 6px;
+            border-radius: 3px;
+            border: 1px solid rgba(111, 66, 193, 0.4);
+            background: rgba(111, 66, 193, 0.08);
+            color: #6f42c1;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.15s;
+            margin-top: 3px;
+        }
+        .btn-duplicate:hover {
+            background: #6f42c1;
+            color: #fff;
+            border-color: #6f42c1;
+        }
     </style>
 </head>
 
@@ -349,17 +414,38 @@
                 </thead>
                 <tbody>
                     <% videos.forEach(function(video) { %>
-                        <tr id="video-row-<%= video.id %>">
+                        <% const isDup = video.is_duplicate == 1; %>
+                        <tr id="video-row-<%= video.id %>" class="<%= isDup ? 'duplicate-row' : '' %>">
                             <td class="text-left">
-                                <strong id="video-name-<%= video.id %>">
-                                    <%= video.display_name %>
-                                </strong><br>
-                                <small style="color:#666; font-size: 10px;">
-                                    <%= video.filename %>
-                                        <% if (video.duration> 0) { %>
-                                            | <%= Math.floor(video.duration / 60000) %>:<%= String(Math.floor((video.duration % 60000) / 1000)).padStart(2, '0') %>
-                                                <% } %>
-                                </small>
+                                <div style="display:flex; align-items:flex-start;">
+                                    <!-- Row move buttons -->
+                                    <div class="row-controls">
+                                        <button class="btn-move" title="Переместить вверх" onclick="reorderRow('<%= video.id %>', 'up')">▲</button>
+                                        <button class="btn-move" title="Переместить вниз" onclick="reorderRow('<%= video.id %>', 'down')">▼</button>
+                                    </div>
+                                    <!-- Title content -->
+                                    <div style="flex:1; min-width:0;">
+                                        <strong id="video-name-<%= video.id %>">
+                                            <%= video.display_name %>
+                                        </strong>
+                                        <% if (isDup) { %>
+                                            <br><span class="duplicate-badge">⎘ копия</span>
+                                        <% } %>
+                                        <br>
+                                        <small style="color:#666; font-size: 10px;">
+                                            <%= video.filename %>
+                                            <% if (video.duration > 0) { %>
+                                                | <%= Math.floor(video.duration / 60000) %>:<%= String(Math.floor((video.duration % 60000) / 1000)).padStart(2, '0') %>
+                                            <% } %>
+                                        </small>
+                                        <% if (!isDup) { %>
+                                            <br>
+                                            <button class="btn-duplicate" title="Создать дубликат" onclick="duplicateVideo('<%= video.id %>')">
+                                                <i class="fas fa-copy"></i> дубликат
+                                            </button>
+                                        <% } %>
+                                    </div>
+                                </div>
                             </td>
                             <% let activeSlots=[]; try { activeSlots=typeof video.target_slots_ids==='string' ? JSON.parse(video.target_slots_ids) : (video.target_slots_ids || []); } catch(e) { activeSlots=[]; } %>
                                 <% slots.forEach(function(slot) { %>
@@ -383,7 +469,10 @@
                                     <% }); %>
                                         <% if (showArchived) { %>
                                             <td id="cell-<%= video.id %>-<%= archiveSlot.id %>" style="background-color: #fffafa;">
-                                                <% if (activeSlots.includes(archiveSlot.id)) { %>
+                                                <% if (isDup) { %>
+                                                    <!-- Duplicates cannot be archived -->
+                                                    <span style="color:#ccc; font-size:11px;" title="Дубликаты не помещаются в архив">—</span>
+                                                <% } else if (activeSlots.includes(archiveSlot.id)) { %>
                                                     <% const isArchUnmuted = video.parsedUnmutedSlots && video.parsedUnmutedSlots.includes(archiveSlot.id); %>
                                                     <div style="display:flex; justify-content:center; gap:5px;">
                                                         <button class="action-btn" style="background-color: <%= isArchUnmuted ? '#17a2b8' : '#6c757d' %>; color: white;" title="<%= isArchUnmuted ? 'Выключить звук' : 'Включить звук' %>" onclick="toggleMute('<%= video.id %>', '<%= archiveSlot.id %>')">
@@ -427,6 +516,7 @@
                         </tr>
                         <% }); %>
                 </tbody>
+
             </table>
         </div>
     </div>
@@ -1124,6 +1214,55 @@
             }
             btn.disabled = false;
             btn.innerHTML = '<i class="fas fa-save"></i> Сохранить';
+        }
+
+        // Create a duplicate (virtual copy) of a video
+        async function duplicateVideo(videoId) {
+            try {
+                const res = await fetch('/ads/duplicate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ videoId })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    location.reload();
+                } else {
+                    alert('Ошибка создания дубликата: ' + (data.error || 'Неизвестная ошибка'));
+                }
+            } catch (e) {
+                alert('Ошибка сети при создании дубликата');
+            }
+        }
+
+        // Move a row up or down (swap sort_order with neighbor)
+        async function reorderRow(videoId, direction) {
+            try {
+                const res = await fetch('/ads/reorder', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ videoId, direction })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    if (!data.alreadyAtEdge) {
+                        // Swap rows in the DOM for instant feedback
+                        const row = document.getElementById(`video-row-${videoId}`);
+                        if (!row) { location.reload(); return; }
+                        if (direction === 'up') {
+                            const prev = row.previousElementSibling;
+                            if (prev) row.parentNode.insertBefore(row, prev);
+                        } else {
+                            const next = row.nextElementSibling;
+                            if (next) row.parentNode.insertBefore(next, row);
+                        }
+                    }
+                } else {
+                    alert('Ошибка перемещения: ' + (data.error || 'Неизвестная ошибка'));
+                }
+            } catch (e) {
+                alert('Ошибка сети при перемещении строки');
+            }
         }
     </script>
 </body>

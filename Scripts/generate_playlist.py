@@ -76,7 +76,7 @@ def generate_playlist(target_date_str=None):
     CHANNEL_FALLBACK_FILE = main_settings['fallback_path'] if main_settings and main_settings['fallback_path'] else FALLBACK_FILE
 
     # 2. Fetch Ad Videos for this specific channel
-    cursor.execute("SELECT id, filename, duration, target_slots_ids, unmuted_slots_ids, source_type, stream_url, rotation_end_date FROM ad_videos WHERE duration > 0 AND channel_id = %s", (CHANNEL_ID,))
+    cursor.execute("SELECT id, filename, duration, target_slots_ids, unmuted_slots_ids, source_type, stream_url, rotation_end_date FROM ad_videos WHERE duration > 0 AND channel_id = %s ORDER BY sort_order ASC, id ASC", (CHANNEL_ID,))
     all_videos = cursor.fetchall()
 
     # Filter out file-backed videos whose files don't exist on disk.
