@@ -447,12 +447,28 @@ router.post('/duplicate', async (req: Request, res: Response) => {
         const original = rows[0];
         const channelId = original.channel_id;
 
-        // Get max sort_order for this channel to place duplicate at end
-        const [maxRows] = await pool.execute<RowDataPacket[]>(
-            'SELECT MAX(sort_order) as maxOrder FROM ad_videos WHERE channel_id = ?',
+        // Ensure sort_order is normalized to avoid placement bugs
+        const [allVideos] = await pool.execute<RowDataPacket[]>(
+            'SELECT id, sort_order FROM ad_videos WHERE channel_id = ? ORDER BY sort_order ASC, id ASC',
             [channelId]
         );
-        const newSortOrder = (maxRows[0].maxOrder ?? 0) + 1;
+        
+        let originalOrder = original.sort_order;
+        const uniqueOrders = new Set(allVideos.map((v: any) => v.sort_order));
+        
+        if (uniqueOrders.size !== allVideos.length) {
+            // Normalize to 10, 20, 30...
+            for (let i = 0; i < allVideos.length; i++) {
+                const newOrder = i * 10;
+                await pool.execute('UPDATE ad_videos SET sort_order = ? WHERE id = ?', [newOrder, allVideos[i].id]);
+                if (allVideos[i].id === original.id) {
+                    originalOrder = newOrder;
+                }
+            }
+        }
+
+        // Place duplicate right after the original
+        const newSortOrder = originalOrder + 5;
 
         const dupName = `${original.display_name} (копия)`;
 
@@ -501,9 +517,9 @@ router.post('/reorder', async (req: Request, res: Response) => {
             [channelId]
         );
 
-        // Normalize sort_order if they are all equal (e.g., all 0 on first use)
+        // Normalize sort_order if there are any collisions
         const uniqueOrders = new Set(allVideos.map((v: any) => v.sort_order));
-        if (uniqueOrders.size <= 1) {
+        if (uniqueOrders.size !== allVideos.length) {
             // Assign sequential sort_order values based on current (id-based) order
             for (let i = 0; i < allVideos.length; i++) {
                 await pool.execute('UPDATE ad_videos SET sort_order = ? WHERE id = ?', [i * 10, allVideos[i].id]);
