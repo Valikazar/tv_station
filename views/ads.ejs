@@ -414,14 +414,17 @@
                 </thead>
                 <tbody>
                     <% videos.forEach(function(video) { %>
-                        <% const isDup = video.is_duplicate == 1; %>
+                        <% const isDupRaw = video.is_duplicate; const isDup = isDupRaw === 1 || isDupRaw === '1' || (Buffer && Buffer.isBuffer && Buffer.isBuffer(isDupRaw) && isDupRaw[0] === 1); %>
                         <tr id="video-row-<%= video.id %>" class="<%= isDup ? 'duplicate-row' : '' %>">
                             <td class="text-left">
                                 <div style="display:flex; align-items:flex-start;">
-                                    <!-- Row move buttons -->
+                                    <!-- Row move buttons + create-duplicate button -->
                                     <div class="row-controls">
                                         <button class="btn-move" title="Переместить вверх" onclick="reorderRow('<%= video.id %>', 'up')">▲</button>
                                         <button class="btn-move" title="Переместить вниз" onclick="reorderRow('<%= video.id %>', 'down')">▼</button>
+                                        <% if (!isDup) { %>
+                                        <button class="btn-move" title="Создать дубликат (копию) этого ролика" onclick="duplicateVideo('<%= video.id %>')" style="margin-top:3px; font-size:12px;">⎘</button>
+                                        <% } %>
                                     </div>
                                     <!-- Title content -->
                                     <div style="flex:1; min-width:0;">
@@ -438,12 +441,6 @@
                                                 | <%= Math.floor(video.duration / 60000) %>:<%= String(Math.floor((video.duration % 60000) / 1000)).padStart(2, '0') %>
                                             <% } %>
                                         </small>
-                                        <% if (!isDup) { %>
-                                            <br>
-                                            <button class="btn-duplicate" title="Создать дубликат" onclick="duplicateVideo('<%= video.id %>')">
-                                                <i class="fas fa-copy"></i> дубликат
-                                            </button>
-                                        <% } %>
                                     </div>
                                 </div>
                             </td>
