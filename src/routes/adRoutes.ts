@@ -490,40 +490,43 @@ router.post('/reorder', async (req: Request, res: Response) => {
         const { videoId, direction } = req.body;
         if (!videoId || !direction) return res.status(400).json({ success: false, error: 'videoId and direction required' });
 
-        const [rows] = await pool.execute<RowDataPacket[]>('SELECT id, sort_order, channel_id FROM ad_videos WHERE id = ?', [videoId]);
+        const [rows] = await pool.execute<RowDataPacket[]>('SELECT id, channel_id FROM ad_videos WHERE id = ?', [videoId]);
         if (rows.length === 0) return res.status(404).json({ success: false, error: 'Video not found' });
 
-        const current = rows[0];
-        const channelId = current.channel_id;
-        const currentOrder = current.sort_order;
+        const channelId = rows[0].channel_id;
 
-        let neighborRows: RowDataPacket[];
-        if (direction === 'up') {
-            // Find the row with the largest sort_order that is still less than current
-            const [nRows] = await pool.execute<RowDataPacket[]>(
-                'SELECT id, sort_order FROM ad_videos WHERE channel_id = ? AND sort_order < ? ORDER BY sort_order DESC LIMIT 1',
-                [channelId, currentOrder]
-            );
-            neighborRows = nRows;
-        } else {
-            // Find the row with the smallest sort_order that is still greater than current
-            const [nRows] = await pool.execute<RowDataPacket[]>(
-                'SELECT id, sort_order FROM ad_videos WHERE channel_id = ? AND sort_order > ? ORDER BY sort_order ASC LIMIT 1',
-                [channelId, currentOrder]
-            );
-            neighborRows = nRows;
+        // Get all videos for this channel in display order (sort_order ASC, id ASC as tiebreaker)
+        const [allVideos] = await pool.execute<RowDataPacket[]>(
+            'SELECT id, sort_order FROM ad_videos WHERE channel_id = ? ORDER BY sort_order ASC, id ASC',
+            [channelId]
+        );
+
+        // Normalize sort_order if they are all equal (e.g., all 0 on first use)
+        const uniqueOrders = new Set(allVideos.map((v: any) => v.sort_order));
+        if (uniqueOrders.size <= 1) {
+            // Assign sequential sort_order values based on current (id-based) order
+            for (let i = 0; i < allVideos.length; i++) {
+                await pool.execute('UPDATE ad_videos SET sort_order = ? WHERE id = ?', [i * 10, allVideos[i].id]);
+                allVideos[i].sort_order = i * 10;
+            }
         }
 
-        if (neighborRows.length === 0) {
-            // Already at boundary — fix sort_order gaps and return
+        // Find current video's position in the ordered list
+        const currentIdx = allVideos.findIndex((v: any) => String(v.id) === String(videoId));
+        if (currentIdx === -1) return res.status(404).json({ success: false, error: 'Video not found in list' });
+
+        const neighborIdx = direction === 'up' ? currentIdx - 1 : currentIdx + 1;
+
+        if (neighborIdx < 0 || neighborIdx >= allVideos.length) {
             return res.json({ success: true, alreadyAtEdge: true });
         }
 
-        const neighbor = neighborRows[0];
+        const current = allVideos[currentIdx];
+        const neighbor = allVideos[neighborIdx];
 
         // Swap sort_order values
-        await pool.execute('UPDATE ad_videos SET sort_order = ? WHERE id = ?', [neighbor.sort_order, videoId]);
-        await pool.execute('UPDATE ad_videos SET sort_order = ? WHERE id = ?', [currentOrder, neighbor.id]);
+        await pool.execute('UPDATE ad_videos SET sort_order = ? WHERE id = ?', [neighbor.sort_order, current.id]);
+        await pool.execute('UPDATE ad_videos SET sort_order = ? WHERE id = ?', [current.sort_order, neighbor.id]);
 
         const username = req.session?.username || 'unknown';
         logAction(username, 'REORDER', `video ID ${videoId} moved ${direction}`);
