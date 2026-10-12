@@ -618,6 +618,27 @@
                     </div>
                     <input type="file" id="videoFile" name="videoFile" accept="video/*,.mp4,.avi,.mov,image/*,.jpg,.jpeg,.png,.webp,.gif" required
                         style="display: none;">
+                    <!-- Clipboard paste zone (contenteditable ensures paste event fires) -->
+                    <div id="pasteZone" contenteditable="true" tabindex="0"
+                         style="margin-top:10px; border:2px dashed #aed6f1; border-radius:6px; padding:12px 16px; text-align:center; color:#888; cursor:text; background:#f8fbff; outline:none; min-height:44px; line-height:20px; font-size:13px; transition:border-color 0.2s, background 0.2s;"
+                         title="Нажмите Ctrl+V чтобы вставить изображение">
+                        <i class="fas fa-paste" style="margin-right:6px;"></i>Нажмите <kbd style="background:#eee;border:1px solid #ccc;border-radius:3px;padding:1px 6px;font-size:11px;font-family:monospace;">Ctrl+V</kbd> чтобы вставить скриншот из буфера обмена
+                    </div>
+                </div>
+
+                <!-- Image display duration (shown only for images) -->
+                <div id="imageDurationGroup" class="form-group" style="display:none; margin-top:12px; background:#f0f8ff; border:1px solid #bee3f8; border-radius:6px; padding:12px;">
+                    <label for="imageDurationSec" style="display:flex; align-items:center; gap:6px; margin-bottom:6px;">
+                        <i class="fas fa-clock" style="color:#3182ce;"></i>
+                        Длительность показа изображения
+                        <span style="color:#666; font-weight:normal; font-size:12px;">(секунд)</span>
+                    </label>
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <input type="number" id="imageDurationSec" name="imageDurationSec" value="15" min="1" max="3600"
+                            style="width:100px; padding:8px; border:1px solid #bee3f8; border-radius:4px; font-size:15px;">
+                        <span style="color:#555; font-size:13px;">сек. (по умолчанию 15 сек.)</span>
+                    </div>
+                    <small style="color:#555; display:block; margin-top:4px;">Изображение будет конвертировано в видео заданной длительности</small>
                 </div>
 
                 <div class="form-group" style="margin-top:12px;">
@@ -743,6 +764,11 @@
 
         document.getElementById('addBtn').onclick = () => {
             document.getElementById('uploadModal').style.display = 'block';
+            // Focus the paste zone so Ctrl+V is intercepted immediately
+            setTimeout(() => {
+                const pz = document.getElementById('pasteZone');
+                if (pz) pz.focus();
+            }, 50);
         };
 
         document.getElementById('showArchived').onchange = function () {
@@ -774,21 +800,133 @@
             }
         };
 
+        // Show/hide image duration field based on file type
+        function checkIfImageAndToggleDuration(file) {
+            const durationGroup = document.getElementById('imageDurationGroup');
+            if (file && file.type.startsWith('image/')) {
+                durationGroup.style.display = 'block';
+            } else {
+                durationGroup.style.display = 'none';
+            }
+        }
+
         // Auto-fill display name and show filename
         document.getElementById('videoFile').addEventListener('change', function () {
             const fileNameDisplay = document.getElementById('fileNameDisplay');
             if (this.files && this.files.length > 0) {
-                const name = this.files[0].name;
+                const file = this.files[0];
+                const name = file.name;
                 fileNameDisplay.textContent = name;
                 fileNameDisplay.style.color = '#333';
 
                 const nameWithoutExt = name.replace(/\.[^/.]+$/, "");
                 const nameInput = document.getElementById('displayName');
                 if (!nameInput.value) nameInput.value = nameWithoutExt;
+
+                checkIfImageAndToggleDuration(file);
             } else {
                 fileNameDisplay.textContent = MSG_NO_FILE;
                 fileNameDisplay.style.color = '#666';
+                checkIfImageAndToggleDuration(null);
             }
+        });
+
+        // ── Ctrl+V clipboard paste ────────────────────────────────────────────
+        // Helper: process a pasted image blob
+        function handlePastedImage(blob) {
+            const now = new Date();
+            const pad = n => String(n).padStart(2, '0');
+            const datePart = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+            const timePart = `${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+            const ext = (blob.type.split('/')[1] || 'png').replace('jpeg','jpg');
+            const fileName = `screenshot_${datePart}_${timePart}.${ext}`;
+
+            // Inject into file input via DataTransfer
+            const file = new File([blob], fileName, { type: blob.type });
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            document.getElementById('videoFile').files = dt.files;
+
+            // Update UI
+            const fileNameDisplay = document.getElementById('fileNameDisplay');
+            fileNameDisplay.textContent = fileName;
+            fileNameDisplay.style.color = '#333';
+
+            const nameInput = document.getElementById('displayName');
+            if (!nameInput.value) nameInput.value = `screenshot_${datePart}_${timePart}`;
+
+            checkIfImageAndToggleDuration(file);
+
+            // Update paste zone to show success
+            const pz = document.getElementById('pasteZone');
+            if (pz) {
+                pz.innerHTML = `<i class="fas fa-check-circle" style="color:#27ae60;"></i> <span style="color:#27ae60;">${fileName}</span> &mdash; готово к загрузке`;
+                pz.style.borderColor = '#27ae60';
+                pz.style.background = '#f0fff4';
+            }
+        }
+
+        // Paste listener on the contenteditable paste zone (most reliable)
+        document.getElementById('pasteZone').addEventListener('paste', function(e) {
+            const items = e.clipboardData && e.clipboardData.items;
+            if (!items) return;
+            for (let i = 0; i < items.length; i++) {
+                if (items[i].type.startsWith('image/')) {
+                    e.preventDefault();
+                    const blob = items[i].getAsFile();
+                    if (blob) { handlePastedImage(blob); }
+                    return;
+                }
+            }
+        });
+
+        // Document-level paste: catches Ctrl+V from ANY focused element inside modal
+        document.addEventListener('paste', function(e) {
+            const uploadModal = document.getElementById('uploadModal');
+            if (!uploadModal || uploadModal.style.display !== 'block') return;
+            // Check if clipboard contains an image (regardless of which element has focus)
+            const items = e.clipboardData && e.clipboardData.items;
+            if (!items) return;
+            for (let i = 0; i < items.length; i++) {
+                if (items[i].type.startsWith('image/')) {
+                    e.preventDefault(); // only prevent default when image found
+                    const blob = items[i].getAsFile();
+                    if (blob) { handlePastedImage(blob); }
+                    return;
+                }
+            }
+            // If no image in clipboard — allow normal text paste into inputs
+        });
+
+        // Visual feedback when pasteZone is focused
+        document.getElementById('pasteZone').addEventListener('focus', function() {
+            this.style.borderColor = '#3182ce';
+            this.style.background = '#ebf8ff';
+        });
+        document.getElementById('pasteZone').addEventListener('blur', function() {
+            // Only reset if not in success state
+            if (!this.style.borderColor.includes('27ae60')) {
+                this.style.borderColor = '#aed6f1';
+                this.style.background = '#f8fbff';
+            }
+        });
+        // Prevent typing into paste zone
+        document.getElementById('pasteZone').addEventListener('keydown', function(e) {
+            if (!(e.ctrlKey && e.key === 'v') && !(e.metaKey && e.key === 'v')) {
+                e.preventDefault();
+            }
+        });
+        // Reset paste zone when modal is closed
+        document.querySelectorAll('[onclick*="uploadModal"]').forEach(function(el) {
+            el.addEventListener('click', function() {
+                const pz = document.getElementById('pasteZone');
+                if (pz) {
+                    pz.innerHTML = '<i class="fas fa-paste" style="margin-right:6px;"></i>Нажмите <kbd style="background:#eee;border:1px solid #ccc;border-radius:3px;padding:1px 6px;font-size:11px;font-family:monospace;">Ctrl+V</kbd> чтобы вставить скриншот из буфера обмена';
+                    pz.style.borderColor = '#aed6f1';
+                    pz.style.background = '#f8fbff';
+                }
+                // Also reset display name if file input was cleared via close
+            });
         });
 
         // AJAX file upload with progress bar
@@ -921,7 +1059,7 @@
                 if (response.ok) {
                     const data = await response.json();
                     SLOT_COUNTS[slotId] = data.slotCount;
-                    if (data.slots.length === 0) {
+                    if (data.deleted || data.slots.length === 0) {
                         const row = document.getElementById(`video-row-${videoId}`);
                         if (row) row.remove();
                     } else {
@@ -1235,10 +1373,13 @@
         // Move a row up or down (swap sort_order with neighbor)
         async function reorderRow(videoId, direction) {
             try {
+                const urlParams = new URLSearchParams(window.location.search);
+                const showArchived = urlParams.get('showArchived') === 'true';
+
                 const res = await fetch('/ads/reorder', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ videoId, direction })
+                    body: JSON.stringify({ videoId, direction, showArchived })
                 });
                 const data = await res.json();
                 if (data.success) {

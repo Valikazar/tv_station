@@ -99,13 +99,19 @@ router.get('/', async (req: Request, res: Response) => {
                 else if (Array.isArray(video.unmuted_slots_ids)) unmutedSlots = video.unmuted_slots_ids;
             } catch (e) { unmutedSlots = []; }
 
-            video.parsedSlots = slots;
-            video.parsedUnmutedSlots = unmutedSlots;
+            const validSlotIds = new Set<number | string>(allAdSlots.map(s => s.dbId));
+            validSlotIds.add(ARCHIVE_SLOT);
+
+            video.parsedSlots = slots.filter((s: string | number) => validSlotIds.has(s));
+            video.parsedUnmutedSlots = unmutedSlots.filter((s: string | number) => validSlotIds.has(s));
             return video;
         }).filter(video => {
             const slots = video.parsedSlots;
-            if (slots.length === 0) return false;
-            if (showArchived) return true;
+            if (slots.length === 0) {
+                // Duplicates or new videos with no slots belong in the active list
+                return !showArchived;
+            }
+            if (showArchived) return slots.includes(ARCHIVE_SLOT);
 
             // If not showing archived, at least one slot must be regular
             return slots.some((s: number | string) => s !== ARCHIVE_SLOT);
@@ -150,12 +156,14 @@ router.post('/upload', uploadMiddleware, async (req: Request, res: Response) => 
 
         let originalName = file.originalname;
 
-        // If uploaded file is an image, convert it to a 15-second video
+        // If uploaded file is an image, convert it to a video of specified duration
         if (file.mimetype.startsWith('image/')) {
-            console.log(`[Upload] Image detected: ${originalName}. Converting to 15s MP4...`);
+            const rawDurSec = parseInt(req.body.imageDurationSec, 10);
+            const imageDurSec = (!isNaN(rawDurSec) && rawDurSec > 0 && rawDurSec <= 3600) ? rawDurSec : 15;
+            console.log(`[Upload] Image detected: ${originalName}. Converting to ${imageDurSec}s MP4...`);
             const tempVideoPath = file.path + '_converted.mp4';
-            // Generate a 15s video from the image with a silent audio track
-            const ffmpegCmd = `ffmpeg -y -loop 1 -framerate 30 -i "${file.path}" -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 -c:v libx264 -t 15 -pix_fmt yuv420p -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2" -c:a aac -shortest "${tempVideoPath}"`;
+            // Generate a video from the image with a silent audio track
+            const ffmpegCmd = `ffmpeg -y -loop 1 -framerate 30 -i "${file.path}" -f lavfi -i anullsrc=channel_layout=stereo:sample_rate=44100 -c:v libx264 -t ${imageDurSec} -pix_fmt yuv420p -vf "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2" -c:a aac -shortest "${tempVideoPath}"`;
             
             await execAsync(ffmpegCmd);
             
@@ -449,7 +457,7 @@ router.post('/duplicate', async (req: Request, res: Response) => {
 
         // Ensure sort_order is normalized to avoid placement bugs
         const [allVideos] = await pool.execute<RowDataPacket[]>(
-            'SELECT id, sort_order FROM ad_videos WHERE channel_id = ? ORDER BY sort_order ASC, id ASC',
+            'SELECT id, sort_order, target_slots_ids FROM ad_videos WHERE channel_id = ? ORDER BY sort_order ASC, id ASC',
             [channelId]
         );
         
@@ -469,16 +477,19 @@ router.post('/duplicate', async (req: Request, res: Response) => {
 
         // Place duplicate right after the original
         const newSortOrder = originalOrder + 5;
+        console.log(`[DUPLICATE] videoId=${videoId}, originalOrder=${originalOrder}, newSortOrder=${newSortOrder}, uniqueOrders.size=${uniqueOrders.size}, allVideos.length=${allVideos.length}`);
 
         const dupName = `${original.display_name} (копия)`;
 
         const [result] = await pool.execute<any>(
             `INSERT INTO ad_videos 
              (filename, display_name, target_slots_ids, unmuted_slots_ids, duration, channel_id, source_type, stream_url, stream_buffer_sec, rotation_end_date, is_duplicate, original_video_id, sort_order)
-             VALUES (?, ?, '[]', '[]', ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
             [
                 original.filename,
                 dupName,
+                original.target_slots_ids || '[]',
+                original.unmuted_slots_ids || '[]',
                 original.duration,
                 channelId,
                 original.source_type || 'file',
@@ -503,17 +514,19 @@ router.post('/duplicate', async (req: Request, res: Response) => {
 // Reorder: swap sort_order of a video with its neighbor (up or down)
 router.post('/reorder', async (req: Request, res: Response) => {
     try {
-        const { videoId, direction } = req.body;
+        const { videoId, direction, showArchived } = req.body;
         if (!videoId || !direction) return res.status(400).json({ success: false, error: 'videoId and direction required' });
+
+        const isShowArchived = showArchived === true;
 
         const [rows] = await pool.execute<RowDataPacket[]>('SELECT id, channel_id FROM ad_videos WHERE id = ?', [videoId]);
         if (rows.length === 0) return res.status(404).json({ success: false, error: 'Video not found' });
 
         const channelId = rows[0].channel_id;
 
-        // Get all videos for this channel in display order (sort_order ASC, id ASC as tiebreaker)
+        // Get all videos for this channel in display order
         const [allVideos] = await pool.execute<RowDataPacket[]>(
-            'SELECT id, sort_order FROM ad_videos WHERE channel_id = ? ORDER BY sort_order ASC, id ASC',
+            'SELECT id, sort_order, target_slots_ids FROM ad_videos WHERE channel_id = ? ORDER BY sort_order ASC, id ASC',
             [channelId]
         );
 
@@ -527,18 +540,43 @@ router.post('/reorder', async (req: Request, res: Response) => {
             }
         }
 
-        // Find current video's position in the ordered list
-        const currentIdx = allVideos.findIndex((v: any) => String(v.id) === String(videoId));
-        if (currentIdx === -1) return res.status(404).json({ success: false, error: 'Video not found in list' });
+        // Filter to visible videos ONLY to find the correct visual neighbor
+        const ARCHIVE_SLOT = 'old';
+        const allAdSlots = getAdSlots(channelId);
+        const validSlotIds = new Set<number | string>(allAdSlots.map(s => s.dbId));
+        validSlotIds.add(ARCHIVE_SLOT);
+
+        const visibleVideos = allVideos.filter((v: any) => {
+            let slots: any[] = [];
+            try {
+                if (typeof v.target_slots_ids === 'string') slots = JSON.parse(v.target_slots_ids || '[]');
+                else if (Array.isArray(v.target_slots_ids)) slots = v.target_slots_ids;
+            } catch (e) { slots = []; }
+            
+            slots = slots.filter((s: string | number) => validSlotIds.has(s));
+
+            if (slots.length === 0) {
+                return !isShowArchived;
+            }
+            
+            if (isShowArchived) return slots.includes(ARCHIVE_SLOT);
+            return slots.some((s: string | number) => s !== ARCHIVE_SLOT);
+        });
+
+        // Find current video's position in the visible list
+        const currentIdx = visibleVideos.findIndex((v: any) => String(v.id) === String(videoId));
+        if (currentIdx === -1) return res.status(404).json({ success: false, error: 'Video not found in visible list' });
 
         const neighborIdx = direction === 'up' ? currentIdx - 1 : currentIdx + 1;
 
-        if (neighborIdx < 0 || neighborIdx >= allVideos.length) {
+        if (neighborIdx < 0 || neighborIdx >= visibleVideos.length) {
             return res.json({ success: true, alreadyAtEdge: true });
         }
 
-        const current = allVideos[currentIdx];
-        const neighbor = allVideos[neighborIdx];
+        const current = visibleVideos[currentIdx];
+        const neighbor = visibleVideos[neighborIdx];
+        
+        console.log(`[REORDER] currentId=${current.id}, currentOrder=${current.sort_order}, neighborId=${neighbor.id}, neighborOrder=${neighbor.sort_order}`);
 
         // Swap sort_order values
         await pool.execute('UPDATE ad_videos SET sort_order = ? WHERE id = ?', [neighbor.sort_order, current.id]);
