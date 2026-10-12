@@ -234,14 +234,16 @@ router.get('/receivers', async (req: Request, res: Response) => {
         res.render('receivers', {
             username: req.session.username,
             lang: req.session.lang || 'en',
-            availableChannels: channels
+            availableChannels: channels,
+            serverIp: process.env.ADDR || '172.16.88.223'
         });
     } catch (err) {
         console.error('Error fetching channels for receivers view:', err);
         res.render('receivers', {
             username: req.session.username,
             lang: req.session.lang || 'en',
-            availableChannels: []
+            availableChannels: [],
+            serverIp: process.env.ADDR || '172.16.88.223'
         });
     }
 });

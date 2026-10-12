@@ -155,9 +155,14 @@
                 <select id="channelSelect" class="form-control" onchange="updateManualUrl()">
                     <option value="">-- Manual Entry --</option>
                     <% availableChannels.forEach(ch => { %>
-                        <option value="<%= ch.protocol || 'udp' %>://<%= ch.multicast_ip %>:<%= ch.multicast_port %>">
-                            <%= ch.name %> (<%= ch.multicast_ip %>:<%= ch.multicast_port %>)
-                        </option>
+                        <optgroup label="<%= ch.name %>">
+                            <option value="<%= ch.protocol || 'udp' %>://<%= ch.multicast_ip %>:<%= ch.multicast_port %>">
+                                <%= ch.name %> [UDP Multicast: <%= ch.multicast_ip %>:<%= ch.multicast_port %>]
+                            </option>
+                            <option value="http://<%= typeof serverIp !== 'undefined' ? serverIp : '172.16.88.223' %>/hls/ch<%= ch.id %>.m3u8">
+                                <%= ch.name %> [HLS Unicast: /hls/ch<%= ch.id %>.m3u8]
+                            </option>
+                        </optgroup>
                     <% }); %>
                 </select>
                 <input type="text" id="streamUrl" class="form-control" style="margin-top:5px;" placeholder="udp://239.0.0.1:1234">
@@ -192,9 +197,12 @@
             if (!url) return '-';
             const ch = availableChannelsList.find(c => {
                 const chUrl = `${c.protocol || 'udp'}://${c.multicast_ip}:${c.multicast_port}`;
-                return chUrl === url;
+                return chUrl === url || url.includes(`/hls/ch${c.id}.m3u8`);
             });
-            if (ch) return `<strong>${ch.name}</strong>`;
+            if (ch) {
+                const isHls = url.includes('.m3u8');
+                return `<strong>${ch.name}</strong> ${isHls ? '<span class="status-badge" style="background:#17a2b8;color:white;font-size:11px;padding:2px 6px;margin-left:4px;">HLS</span>' : '<span class="status-badge" style="background:#6c757d;color:white;font-size:11px;padding:2px 6px;margin-left:4px;">UDP</span>'}`;
+            }
             // If it doesn't match a channel, show a shortened version of the URL
             return `<span style="font-size: 0.8em; color: #888;">${url.replace('udp://', '').replace('rtp://', '')}</span>`;
         }
