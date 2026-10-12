@@ -2,7 +2,7 @@ import http from 'http';
 import pool from '../config/db';
 import { RowDataPacket } from 'mysql2';
 
-function makeDockerRequest(method: string, path: string, payload?: any): Promise<any> {
+export function makeDockerRequest(method: string, path: string, payload?: any): Promise<any> {
     return new Promise((resolve, reject) => {
         const options: http.RequestOptions = {
             socketPath: '/var/run/docker.sock',
@@ -197,7 +197,7 @@ export async function startHlsWriter(channelId: number): Promise<string> {
 
     // Fresh container: clean stale segments first, then start ffmpeg
     await makeDockerRequest('POST', `/containers/create?name=${containerName}`, {
-        Image: 'tv_station-tsduck_ch2',
+        Image: 'tv_station-tv_site',
         Entrypoint: ['sh', '-c'],
         Cmd: [
             // Purge stale segments from previous run before starting ffmpeg
