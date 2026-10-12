@@ -4,17 +4,9 @@ import { RowDataPacket } from 'mysql2';
 import { createAndStartChannelContainers, stopChannelContainers, getHostNetworkInterfaces, stopBeaconIfNoChannelsActive, startHlsWriter, stopHlsWriter, pauseHlsWriter, isHlsWriterRunning } from '../services/dockerService';
 import { initializeChannelDefaults } from '../utils/timeSlots';
 
-// In-process heartbeat timers: channelId → timeout handle
-const hlsTimers: Record<number, ReturnType<typeof setTimeout>> = {};
-const HLS_INACTIVITY_MS = 5 * 60 * 1000; // 5 minutes
-
+// Permanent HLS: writers run 24/7 alongside active channels, no inactivity pausing
 function resetHlsTimer(channelId: number) {
-    if (hlsTimers[channelId]) clearTimeout(hlsTimers[channelId]);
-    hlsTimers[channelId] = setTimeout(async () => {
-        console.log(`[HLS] Pausing channel ${channelId} due to inactivity (no ping for 5 min).`);
-        try { await pauseHlsWriter(channelId); } catch { /* ignore */ }
-        delete hlsTimers[channelId];
-    }, HLS_INACTIVITY_MS);
+    // No-op in permanent HLS mode
 }
 
 const router = express.Router();
@@ -165,16 +157,10 @@ router.post('/:id/hls/ping', (req: Request, res: Response) => {
     res.json({ success: true });
 });
 
-// Stop HLS writer explicitly (pauses the container, keeps it warm)
+// Stop HLS writer endpoint (kept for API compatibility, but in permanent 24/7 mode HLS runs continuously)
 router.post('/:id/hls/stop', async (req: Request, res: Response) => {
-    const channelId = parseInt(req.params.id as string);
-    if (hlsTimers[channelId]) { clearTimeout(hlsTimers[channelId]); delete hlsTimers[channelId]; }
-    try {
-        await pauseHlsWriter(channelId);
-        res.json({ success: true });
-    } catch (e: any) {
-        res.status(500).json({ success: false, error: e.message });
-    }
+    // In permanent 24/7 mode, closing a browser preview does not stop HLS for receivers/monitors
+    res.json({ success: true, permanent: true });
 });
 
 // HLS status check

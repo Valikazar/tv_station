@@ -133,6 +133,13 @@ export async function createAndStartChannelContainers(channelId: number) {
 
     // Start beacon stream for this interface (idempotent)
     await startBeaconStream(interfaceIp);
+
+    // Start permanent 24/7 HLS writer for this channel
+    try {
+        await startHlsWriter(channelId);
+    } catch (err) {
+        console.error(`Failed to start permanent HLS writer for Channel ${channelId}:`, err);
+    }
 }
 
 export async function stopChannelContainers(channelId: number) {
@@ -205,7 +212,7 @@ export async function startHlsWriter(channelId: number): Promise<string> {
         HostConfig: {
             NetworkMode: 'host',
             Binds: ['/dev/shm:/dev/shm'],
-            RestartPolicy: { Name: 'no' }
+            RestartPolicy: { Name: 'always' }
         }
     });
     await makeDockerRequest('POST', `/containers/${containerName}/start`);

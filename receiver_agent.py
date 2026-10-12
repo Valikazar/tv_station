@@ -126,14 +126,59 @@ def get_ip_address() -> str:
 
 # ── Server Discovery ───────────────────────────────────────────────────────────
 DISCOVERY_PORT = 5555
-KNOWN_SERVER_IPS = []  # Optional fallback IPs populated at runtime
+KNOWN_SERVER_IPS = ["172.16.88.223"]  # Known fallback server IPs for cross-subnet / routed setups
 
 def discover_server() -> str | None:
     """
-    Sends a UDP broadcast 'TV-DISCOVER' packet on port 5555.
-    The server replies with 'TV-SERVER:http://...'.
-    Falls back to checking known IPs directly via HTTP.
+    Finds the server URL:
+    1. Checks TV_SERVER_URL environment variable.
+    2. Checks CLI arguments (--server <url> or --server=<url>).
+    3. Checks /etc/tv_server or ~/tv_server.txt file.
+    4. Sends a UDP broadcast 'TV-DISCOVER' packet on port 5555.
+    5. Falls back to subnet scan & checking KNOWN_SERVER_IPS directly.
     """
+    # 1. Environment variable override
+    env_server = os.environ.get("TV_SERVER_URL")
+    if env_server:
+        srv = env_server.strip().rstrip('/')
+        if srv:
+            if not srv.startswith('http://') and not srv.startswith('https://'):
+                srv = f"http://{srv}:3000"
+            log(f"[Discovery] Using server from TV_SERVER_URL: {srv}")
+            return srv
+
+    # 2. Command-line argument override
+    for i, arg in enumerate(sys.argv):
+        if arg in ("--server", "-s") and i + 1 < len(sys.argv):
+            srv = sys.argv[i + 1].strip().rstrip('/')
+            if srv:
+                if not srv.startswith('http://') and not srv.startswith('https://'):
+                    srv = f"http://{srv}:3000"
+                log(f"[Discovery] Using server from CLI argument: {srv}")
+                return srv
+        elif arg.startswith("--server="):
+            srv = arg.split("=", 1)[1].strip().rstrip('/')
+            if srv:
+                if not srv.startswith('http://') and not srv.startswith('https://'):
+                    srv = f"http://{srv}:3000"
+                log(f"[Discovery] Using server from CLI argument: {srv}")
+                return srv
+
+    # 3. Static configuration file override
+    for conf_path in ["/etc/tv_server", "/home/pi/tv_server.txt", os.path.expanduser("~/tv_server.txt")]:
+        if os.path.exists(conf_path):
+            try:
+                with open(conf_path, "r") as f:
+                    srv = f.read().strip().rstrip('/')
+                    if srv:
+                        if not srv.startswith('http://') and not srv.startswith('https://'):
+                            srv = f"http://{srv}:3000"
+                        log(f"[Discovery] Using server from {conf_path}: {srv}")
+                        return srv
+            except Exception:
+                pass
+
+    # 4. UDP broadcast discovery
     log(f"[Discovery] Broadcasting TV-DISCOVER on port {DISCOVERY_PORT}...")
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -167,6 +212,18 @@ def discover_server() -> str | None:
             finally:
                 try: sock2.close()
                 except: pass
+
+        # 5. Direct probe of known server IPs
+        for ip in KNOWN_SERVER_IPS:
+            target_url = f"http://{ip}:3000"
+            try:
+                log(f"[Discovery] Probing known server {target_url}...")
+                resp = requests.get(f"{target_url}/api/receivers/config", params={"id": "probe"}, timeout=2)
+                if resp.status_code in (200, 400):
+                    log(f"[Discovery] Successfully reached known server: {target_url}")
+                    return target_url
+            except Exception:
+                pass
     except Exception as e:
         log(f"[Discovery] Error: {e}")
     finally:
