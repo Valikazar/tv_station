@@ -121,8 +121,43 @@ def generate_playlist(target_date_str=None):
             except: pass
         return slot_videos
 
-    mainstream_videos = get_videos_for_slot(0)
-    slot_video_map = {s['id']: get_videos_for_slot(s['id']) for s in slots}
+    def spread_duplicates(vid_list):
+        """Reorder a video list so that videos sharing the same filename
+        (i.e. original + its duplicates) are spread as far apart as possible,
+        while preserving the relative order of distinct filenames.
+        
+        Algorithm: group by filename keeping original order, then interleave
+        round-robin from all groups so that same-file entries are maximally spaced.
+        """
+        if len(vid_list) <= 1:
+            return vid_list
+
+        from collections import OrderedDict
+        groups = OrderedDict()
+        for v in vid_list:
+            fn = v['filename']
+            if fn not in groups:
+                groups[fn] = []
+            groups[fn].append(v)
+
+        # If no filename appears more than once, nothing to spread
+        if all(len(g) == 1 for g in groups.values()):
+            return vid_list
+
+        # Round-robin interleave: take one from each group in turn
+        result = []
+        queues = [list(g) for g in groups.values()]
+        while queues:
+            next_round = []
+            for q in queues:
+                result.append(q.pop(0))
+                if q:
+                    next_round.append(q)
+            queues = next_round
+        return result
+
+    mainstream_videos = spread_duplicates(get_videos_for_slot(0))
+    slot_video_map = {s['id']: spread_duplicates(get_videos_for_slot(s['id'])) for s in slots}
 
     current_ms = 0
     end_of_day_ms = 86400 * 1000

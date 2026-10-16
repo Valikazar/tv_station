@@ -185,10 +185,16 @@ router.post('/upload', uploadMiddleware, async (req: Request, res: Response) => 
 
         const channelId = req.session.currentChannelId || 1;
 
+        // Find the minimum sort_order so the new video appears at the top of the list
+        const [minOrderRows] = await pool.execute<RowDataPacket[]>(
+            'SELECT MIN(sort_order) as min_order FROM ad_videos WHERE channel_id = ?', [channelId]
+        );
+        const newSortOrder = (minOrderRows[0]?.min_order != null ? minOrderRows[0].min_order : 0) - 10;
+
         // Insert into DB first to get ID
         const [result] = await pool.execute<any>(
-            'INSERT INTO ad_videos (filename, display_name, target_slots_ids, duration, channel_id, rotation_end_date) VALUES (?, ?, ?, ?, ?, ?)',
-            ['TEMP', displayName || originalName, JSON.stringify(slotIds), duration, channelId, rotationEndDate]
+            'INSERT INTO ad_videos (filename, display_name, target_slots_ids, duration, channel_id, rotation_end_date, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            ['TEMP', displayName || originalName, JSON.stringify(slotIds), duration, channelId, rotationEndDate, newSortOrder]
         );
         const videoId = result.insertId;
 
@@ -616,15 +622,21 @@ router.post('/add-stream', async (req: Request, res: Response) => {
             slotIds = [isNaN(Number(slots)) ? slots : Number(slots)];
         }
 
+        // Find the minimum sort_order so the new stream appears at the top of the list
+        const [minOrderRows] = await pool.execute<RowDataPacket[]>(
+            'SELECT MIN(sort_order) as min_order FROM ad_videos WHERE channel_id = ?', [channelId]
+        );
+        const newSortOrder = (minOrderRows[0]?.min_order != null ? minOrderRows[0].min_order : 0) - 10;
+
         // Use a synthetic filename so playout.py can identify it as a stream
         const tempFilename = `stream_${Date.now()}`;
         const endDate = rotationEndDate && rotationEndDate.trim() ? rotationEndDate.trim() : null;
 
         const [result] = await pool.execute<any>(
             `INSERT INTO ad_videos 
-             (filename, display_name, target_slots_ids, duration, channel_id, source_type, stream_url, stream_buffer_sec, rotation_end_date)
-             VALUES (?, ?, ?, ?, ?, 'stream', ?, ?, ?)`,
-            [tempFilename, name, JSON.stringify(slotIds), durationMs, channelId, streamUrl.trim(), buffer, endDate]
+             (filename, display_name, target_slots_ids, duration, channel_id, source_type, stream_url, stream_buffer_sec, rotation_end_date, sort_order)
+             VALUES (?, ?, ?, ?, ?, 'stream', ?, ?, ?, ?)`,
+            [tempFilename, name, JSON.stringify(slotIds), durationMs, channelId, streamUrl.trim(), buffer, endDate, newSortOrder]
         );
         const videoId = result.insertId;
 
